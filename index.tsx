@@ -4,10 +4,9 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
-import { definePluginSettings } from "@api/Settings";
-import definePlugin, { OptionType } from "@utils/types";
+import definePlugin from "@utils/types";
 
-import { setActiveCache } from "./cacheAccess";
+import { setActiveCache, setRebuildCache } from "./cacheAccess";
 import { CacheUsageBar } from "./CacheUsageBar";
 import {
     cacheKeyForUrl,
@@ -25,40 +24,13 @@ import {
     type FavoriteGifCache,
 } from "./gifCache";
 import { cacheOnUserAction, ensureCached, installFetchInterceptor } from "./media";
+import { getPluginNative } from "./nativeApi";
+import { setUsageBarComponent, settings, settingsHooks } from "./settings";
+import { createBackendForPath } from "./storage";
 
-export const settings = definePluginSettings({
-    cacheUsage: {
-        type: OptionType.COMPONENT,
-        description: "Live cache usage",
-        component: () => <CacheUsageBar />,
-    },
-    maxEntries: {
-        type: OptionType.NUMBER,
-        description: "How many favorite GIFs to keep on disk (default 500)",
-        default: DEFAULT_MAX_ENTRIES,
-        onChange: () => {
-            void applyLimitsFromSettings();
-        },
-    },
-    maxMegabytes: {
-        type: OptionType.NUMBER,
-        description: "Max total cache size in MB (default 500)",
-        default: 500,
-        onChange: () => {
-            void applyLimitsFromSettings();
-        },
-    },
-    prefetchOnStart: {
-        type: OptionType.BOOLEAN,
-        description: "Download missing favorites in the background after Discord starts",
-        default: true,
-    },
-    rewriteFavoriteSrc: {
-        type: OptionType.BOOLEAN,
-        description: "Point favorite thumbnails at local blob URLs when we have them cached",
-        default: true,
-    },
-});
+export { settings };
+
+setUsageBarComponent(() => <CacheUsageBar />);
 
 let cache: FavoriteGifCache | null = null;
 let uninstallFetch: (() => void) | null = null;
@@ -74,16 +46,36 @@ function maxBytesFromSettings() {
     return Math.floor(mb * 1024 * 1024);
 }
 
+function createBackend() {
+    const dir = (settings.store.cacheDirectory || "").trim();
+    const native = getPluginNative();
+    return createBackendForPath(dir, native);
+}
+
 function getCache() {
     if (!cache) {
         cache = createFavoriteGifCache({
             maxEntries: settings.store.maxEntries || DEFAULT_MAX_ENTRIES,
             maxBytes: maxBytesFromSettings(),
+            backend: createBackend(),
+            smartEviction: settings.store.smartEviction !== false,
         });
         setActiveCache(cache);
     }
     return cache;
 }
+
+async function rebuildCache() {
+    cache = null;
+    setActiveCache(null);
+    const c = getCache();
+    await c.init();
+    c.setSmartEviction(settings.store.smartEviction !== false);
+    await applyLimitsFromSettings();
+    return c;
+}
+
+setRebuildCache(rebuildCache);
 
 async function applyLimitsFromSettings() {
     try {
@@ -92,11 +84,22 @@ async function applyLimitsFromSettings() {
         const max = Math.max(1, Number(settings.store.maxEntries) || DEFAULT_MAX_ENTRIES);
         await c.setMaxEntries(max);
         await c.setMaxBytes(maxBytesFromSettings());
+        c.setSmartEviction(settings.store.smartEviction !== false);
         c.warmAllBlobUrls();
     } catch {
         // settings UI should still work
     }
 }
+
+settingsHooks.onLimitsChange = () => { void applyLimitsFromSettings(); };
+settingsHooks.onSmartEvictionChange = () => {
+    try {
+        getCache().setSmartEviction(settings.store.smartEviction !== false);
+    } catch {
+        // ignore
+    }
+};
+settingsHooks.onCacheDirectoryChange = () => { void rebuildCache(); };
 
 /**
  * Update the known favorite URL set.
