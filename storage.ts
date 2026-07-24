@@ -184,7 +184,107 @@ export class IndexedDBStorageBackend implements StorageBackend {
     }
 }
 
+/**
+ * Folder on disk via plugin native.ts (desktop only).
+ * Each entry is a blob file + meta.json row.
+ */
+export class FileStorageBackend implements StorageBackend {
+    readonly name = "filesystem";
+    constructor(
+        private readonly dir: string,
+        private readonly api: {
+            ensureCacheDir(dir: string): Promise<unknown>;
+            loadAllEntries(dir: string): Promise<Array<{
+                key: string;
+                data: ArrayBuffer;
+                mimeType: string;
+                useCount: number;
+                lastUsed: number;
+                createdAt: number;
+                size: number;
+            }>>;
+            putEntry(dir: string, entry: {
+                key: string;
+                data: ArrayBuffer;
+                mimeType: string;
+                useCount: number;
+                lastUsed: number;
+                createdAt: number;
+                size: number;
+            }): Promise<unknown>;
+            deleteEntry(dir: string, key: string): Promise<unknown>;
+            deleteEntries(dir: string, keys: string[]): Promise<unknown>;
+            clearCacheDir(dir: string): Promise<unknown>;
+        },
+    ) {}
+
+    get directory() {
+        return this.dir;
+    }
+
+    async open() {
+        await this.api.ensureCacheDir(this.dir);
+    }
+
+    async close() {}
+
+    async getAll(): Promise<CacheEntry[]> {
+        const rows = await this.api.loadAllEntries(this.dir);
+        return rows.map(r => toEntry({
+            key: r.key,
+            data: r.data,
+            mimeType: r.mimeType,
+            useCount: r.useCount,
+            lastUsed: r.lastUsed,
+            createdAt: r.createdAt,
+            size: r.size,
+        }));
+    }
+
+    async get(key: string) {
+        const all = await this.getAll();
+        return all.find(e => e.key === key) ?? null;
+    }
+
+    async put(entry: CacheEntry) {
+        const copy = entry.data.slice();
+        await this.api.putEntry(this.dir, {
+            key: entry.key,
+            data: copy.buffer.slice(copy.byteOffset, copy.byteOffset + copy.byteLength),
+            mimeType: entry.mimeType,
+            useCount: entry.useCount,
+            lastUsed: entry.lastUsed,
+            createdAt: entry.createdAt,
+            size: entry.data.byteLength,
+        });
+    }
+
+    async delete(key: string) {
+        await this.api.deleteEntry(this.dir, key);
+    }
+
+    async clear() {
+        await this.api.clearCacheDir(this.dir);
+    }
+
+    async deleteMany(keys: string[]) {
+        if (!keys.length) return;
+        await this.api.deleteEntries(this.dir, keys);
+    }
+}
+
 export function createDefaultBackend(): StorageBackend {
     if (typeof indexedDB !== "undefined") return new IndexedDBStorageBackend();
     return new MemoryStorageBackend();
+}
+
+export function createBackendForPath(
+    cacheDir: string | undefined | null,
+    nativeApi: FileStorageBackend["api"] | null,
+): StorageBackend {
+    const dir = (cacheDir || "").trim();
+    if (dir && nativeApi) {
+        return new FileStorageBackend(dir, nativeApi);
+    }
+    return createDefaultBackend();
 }
