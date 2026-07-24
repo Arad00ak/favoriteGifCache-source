@@ -20,6 +20,11 @@ export { MemoryStorageBackend };
 
 export interface FavoriteGifCacheOptions extends CacheCoreOptions {
     backend?: StorageBackend;
+    /**
+     * When false, put(..., { allowEvict: true }) will not drop old entries.
+     * New items are refused if the cache is full.
+     */
+    smartEviction?: boolean;
 }
 
 export interface BlobUrlOptions {
@@ -30,6 +35,7 @@ export interface BlobUrlOptions {
 export class FavoriteGifCache {
     private readonly core: GifCacheCore;
     private readonly backend: StorageBackend;
+    private smartEviction: boolean;
     private ready: Promise<void> | null = null;
     private initDone = false;
     private blobUrls = new Map<string, string>();
@@ -38,10 +44,19 @@ export class FavoriteGifCache {
     constructor(options: FavoriteGifCacheOptions = {}) {
         this.core = new GifCacheCore(options);
         this.backend = options.backend ?? createDefaultBackend();
+        this.smartEviction = options.smartEviction !== false;
     }
 
     get backendName() {
         return this.backend.name;
+    }
+
+    getSmartEviction() {
+        return this.smartEviction;
+    }
+
+    setSmartEviction(enabled: boolean) {
+        this.smartEviction = enabled;
     }
 
     isInitialized() {
@@ -165,7 +180,8 @@ export class FavoriteGifCache {
         options: PutOptions = {},
     ): Promise<PutResult> {
         await this.init();
-        const result = this.core.put(key, data, mimeType, options);
+        const allowEvict = this.smartEviction && options.allowEvict === true;
+        const result = this.core.put(key, data, mimeType, { allowEvict });
 
         if (result.evictedKeys.length) {
             await this.backend.deleteMany(result.evictedKeys);
@@ -338,5 +354,6 @@ export function createFavoriteGifCache(options: FavoriteGifCacheOptions = {}) {
         maxBytes: options.maxBytes ?? DEFAULT_MAX_BYTES,
         backend: options.backend,
         now: options.now,
+        smartEviction: options.smartEviction,
     });
 }
