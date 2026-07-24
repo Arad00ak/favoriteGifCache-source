@@ -45,6 +45,7 @@ describe("user actions vs scroll fill", () => {
             maxEntries: 2,
             backend: new MemoryStorageBackend(),
             now: () => ++t,
+            smartEviction: true,
         });
         await cache.put("https://media.tenor.com/idle.gif", bytes("IDLE"));
         await cache.put("https://media.tenor.com/hot.gif", bytes("HOT"));
@@ -62,6 +63,29 @@ describe("user actions vs scroll fill", () => {
         assert.equal(cache.has("https://media.tenor.com/hot.gif"), true);
         assert.equal(cache.has("https://media.tenor.com/idle.gif"), false);
         assert.equal(cache.size(), 2);
+    });
+
+    it("smartEviction off refuses store when full instead of deleting", async () => {
+        let t = 0;
+        const cache = createFavoriteGifCache({
+            maxEntries: 2,
+            backend: new MemoryStorageBackend(),
+            now: () => ++t,
+            smartEviction: false,
+        });
+        await cache.put("https://media.tenor.com/a.gif", bytes("A"));
+        await cache.put("https://media.tenor.com/b.gif", bytes("B"));
+
+        const res = await cacheOnUserAction(
+            cache,
+            "https://media.tenor.com/c.gif",
+            fakeFetch("C"),
+        );
+        assert.ok(res);
+        assert.equal(res!.stored, false);
+        assert.equal(cache.has("https://media.tenor.com/a.gif"), true);
+        assert.equal(cache.has("https://media.tenor.com/b.gif"), true);
+        assert.equal(cache.has("https://media.tenor.com/c.gif"), false);
     });
 
     it("send path works after a scroll miss left the entry unstored", async () => {
