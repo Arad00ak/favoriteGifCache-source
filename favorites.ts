@@ -1,0 +1,138 @@
+export interface FavoriteGifRef {
+    url: string;
+    src: string;
+    width?: number;
+    height?: number;
+    format?: number;
+    order?: number;
+}
+
+type WebpackFind = (filter: (m: any) => boolean) => any;
+
+function getWebpackFind(): WebpackFind | null {
+    try {
+        const w = (globalThis as any).Vencord?.Webpack?.find
+            ?? (globalThis as any).Equicord?.Webpack?.find;
+        if (typeof w === "function") return w;
+    } catch {
+        // ignore
+    }
+    return null;
+}
+
+/** Pull favorite gif urls from Discord's frecency settings blob. */
+export function getFavoriteGifRefsFromFrecency(): FavoriteGifRef[] {
+    try {
+        const find = getWebpackFind();
+        if (!find) return [];
+
+        const FrecencyUserSettings = find(
+            (m: any) => typeof m?.ProtoClass?.typeName === "string"
+                && m.ProtoClass.typeName.endsWith(".FrecencyUserSettings"),
+        );
+        if (!FrecencyUserSettings?.getCurrentValue) return [];
+
+        const value = FrecencyUserSettings.getCurrentValue();
+        const gifs = value?.favoriteGifs?.gifs;
+        if (!gifs || typeof gifs !== "object") return [];
+
+        const out: FavoriteGifRef[] = [];
+        for (const [key, meta] of Object.entries(gifs as Record<string, any>)) {
+            const url = typeof meta?.url === "string" ? meta.url : key;
+            const src = typeof meta?.src === "string" ? meta.src : url;
+            if (!url && !src) continue;
+            out.push({
+                url: url || src,
+                src: src || url,
+                width: meta?.width,
+                height: meta?.height,
+                format: meta?.format,
+                order: meta?.order,
+            });
+        }
+        return out;
+    } catch {
+        return [];
+    }
+}
+
+export function cacheKeyForUrl(url: string) {
+    if (!url) return url;
+    try {
+        const u = new URL(url);
+        if (
+            u.hostname.includes("tenor.com")
+            || u.hostname.includes("giphy.com")
+            || u.hostname.includes("discordapp")
+            || u.hostname.includes("discord.com")
+        ) {
+            return `${u.origin}${u.pathname}`;
+        }
+        return u.href;
+    } catch {
+        return url;
+    }
+}
+
+export function keysForFavorite(ref: FavoriteGifRef) {
+    const keys = new Set<string>();
+    if (ref.url) {
+        keys.add(cacheKeyForUrl(ref.url));
+        keys.add(ref.url);
+    }
+    if (ref.src) {
+        keys.add(cacheKeyForUrl(ref.src));
+        keys.add(ref.src);
+    }
+    return [...keys];
+}
+
+export function isLikelyGifMediaUrl(url: string) {
+    if (!url || typeof url !== "string") return false;
+    if (url.startsWith("blob:") || url.startsWith("data:")) return false;
+    try {
+        const u = new URL(url);
+        const host = u.hostname;
+        if (
+            host.includes("tenor.com")
+            || host.includes("giphy.com")
+            || host.includes("media.discordapp")
+            || host.includes("cdn.discordapp")
+            || host.includes("discordapp.net")
+        ) {
+            return true;
+        }
+        return /\.(gif|mp4|webm|webp|png|jpe?g)(\?|$)/i.test(u.pathname);
+    } catch {
+        return false;
+    }
+}
+
+/**
+ * Heavy video "gifs" (mp4/webm) — leave them to Discord's network.
+ * They blow up cache size; we only store real image GIFs/webp/png/jpeg.
+ */
+export function isHeavyVideoUrl(url: string) {
+    if (!url || typeof url !== "string") return false;
+    if (url.startsWith("blob:") || url.startsWith("data:")) return false;
+    try {
+        const path = new URL(url).pathname.toLowerCase();
+        if (/\.(mp4|webm|mov|m4v)(\?|$)/i.test(path)) return true;
+        // tenor/giphy often omit extension; still catch obvious video path markers
+        if (/\/video\//i.test(path) || /-mp4/i.test(path)) return true;
+        return false;
+    } catch {
+        return /\.(mp4|webm|mov|m4v)(\?|$)/i.test(url);
+    }
+}
+
+export function isHeavyVideoMime(mime: string | null | undefined) {
+    if (!mime) return false;
+    const m = mime.toLowerCase().split(";")[0]!.trim();
+    return m.startsWith("video/") || m === "application/mp4";
+}
+
+/** Safe to download into the on-disk favorite cache. */
+export function isCacheableFavoriteUrl(url: string) {
+    return isLikelyGifMediaUrl(url) && !isHeavyVideoUrl(url);
+}
