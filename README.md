@@ -32,9 +32,11 @@ Protected keys prefer to keep current Discord favorites when something must go.
 
 ## Settings
 
-- **Cache usage** — bars for GIF count (`N / 500`) and size (`X MB / 500 MB`), filled when you open the settings page (not polled)
+- **Cache usage** — bars for GIF count and size (`X MB / 500 MB`), **Clear cache**, and (desktop) **Choose folder**
 - **Max entries** — how many favorites to keep (default 500)
 - **Max megabytes** — total size budget (default 500 MB)
+- **Cache directory** — optional folder on disk (empty = IndexedDB in Discord profile). Desktop only for the folder picker
+- **Smart eviction** — when on, full cache can drop least-used GIFs for new favorites/sends; when off, nothing is deleted for new downloads
 - **Prefetch on start** — fill empty cache slots after Discord boots
 - **Rewrite favorite src** — swap cached favorites onto local `blob:` URLs for display
 
