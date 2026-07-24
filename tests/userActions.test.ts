@@ -1,0 +1,94 @@
+import assert from "node:assert/strict";
+import { describe, it } from "node:test";
+
+import { createFavoriteGifCache, MemoryStorageBackend } from "../gifCache.ts";
+import { cacheOnUserAction, ensureCached } from "../media.ts";
+
+function bytes(s: string) {
+    return new TextEncoder().encode(s);
+}
+
+function fakeFetch(body: string): typeof fetch {
+    return async () =>
+        new Response(bytes(body), {
+            status: 200,
+            headers: { "Content-Type": "image/gif" },
+        });
+}
+
+describe("user actions vs scroll fill", () => {
+    it("scroll fill does not evict when full", async () => {
+        let t = 0;
+        const cache = createFavoriteGifCache({
+            maxEntries: 2,
+            backend: new MemoryStorageBackend(),
+            now: () => ++t,
+        });
+        await cache.put("https://media.tenor.com/a.gif", bytes("A"));
+        await cache.put("https://media.tenor.com/b.gif", bytes("B"));
+        await cache.get("https://media.tenor.com/a.gif");
+
+        await ensureCached(cache, "https://media.tenor.com/c.gif", {
+            fetchImpl: fakeFetch("C"),
+            allowEvict: false,
+        });
+
+        assert.equal(cache.has("https://media.tenor.com/a.gif"), true);
+        assert.equal(cache.has("https://media.tenor.com/b.gif"), true);
+        assert.equal(cache.has("https://media.tenor.com/c.gif"), false);
+        assert.equal(cache.size(), 2);
+    });
+
+    it("new favorite / send (cacheOnUserAction) evicts least-used when full", async () => {
+        let t = 0;
+        const cache = createFavoriteGifCache({
+            maxEntries: 2,
+            backend: new MemoryStorageBackend(),
+            now: () => ++t,
+        });
+        await cache.put("https://media.tenor.com/idle.gif", bytes("IDLE"));
+        await cache.put("https://media.tenor.com/hot.gif", bytes("HOT"));
+        await cache.get("https://media.tenor.com/hot.gif");
+        await cache.get("https://media.tenor.com/hot.gif");
+
+        const res = await cacheOnUserAction(
+            cache,
+            "https://media.tenor.com/new-fav.gif",
+            fakeFetch("NEW"),
+        );
+        assert.ok(res);
+        assert.equal(res!.stored, true);
+        assert.equal(cache.has("https://media.tenor.com/new-fav.gif"), true);
+        assert.equal(cache.has("https://media.tenor.com/hot.gif"), true);
+        assert.equal(cache.has("https://media.tenor.com/idle.gif"), false);
+        assert.equal(cache.size(), 2);
+    });
+
+    it("send path works after a scroll miss left the entry unstored", async () => {
+        let t = 0;
+        const cache = createFavoriteGifCache({
+            maxEntries: 1,
+            backend: new MemoryStorageBackend(),
+            now: () => ++t,
+        });
+        await cache.put("https://media.tenor.com/keep-until-send.gif", bytes("KEEP"));
+
+        // scroll-style miss: download but no room
+        const scroll = await ensureCached(cache, "https://media.tenor.com/later-send.gif", {
+            fetchImpl: fakeFetch("LATER"),
+            allowEvict: false,
+        });
+        assert.equal(scroll!.stored, false);
+        assert.equal(cache.has("https://media.tenor.com/later-send.gif"), false);
+
+        // user actually sends it → force store + evict
+        const sent = await cacheOnUserAction(
+            cache,
+            "https://media.tenor.com/later-send.gif",
+            fakeFetch("LATER"),
+        );
+        assert.equal(sent!.stored, true);
+        assert.equal(cache.has("https://media.tenor.com/later-send.gif"), true);
+        assert.equal(cache.has("https://media.tenor.com/keep-until-send.gif"), false);
+    });
+});
