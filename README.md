@@ -4,8 +4,8 @@ Development / source monorepo for the FavoriteGifCache Equicord & Vencord userpl
 
 **Install for users** is a **separate** repo (plugin files only at the root for `git clone` into `userplugins`).
 
-User install repo: https://github.com/Arad00ak/FavoriteGifCache-userplugin  
-(If that URL is not up yet, create it and push from `../FavoriteGifCache-userplugin`.)
+**User install repo (clone this into `userplugins`):**  
+https://github.com/Arad00ak/FavoriteGifCache-userplugin
 
 Install guide (Equicord):  
 https://discord.com/channels/1015060230222131221/1257038407503446176
