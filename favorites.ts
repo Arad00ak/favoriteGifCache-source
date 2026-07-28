@@ -4,6 +4,7 @@ export interface FavoriteGifRef {
     width?: number;
     height?: number;
     format?: number;
+    /** Discord favorite order — higher usually means newer / more recent. */
     order?: number;
 }
 
@@ -50,10 +51,29 @@ export function getFavoriteGifRefsFromFrecency(): FavoriteGifRef[] {
                 order: meta?.order,
             });
         }
-        return out;
+        return sortFavoritesNewestFirst(out);
     } catch {
         return [];
     }
+}
+
+/** Newest first (higher `order` first). Missing order sorts last. */
+export function sortFavoritesNewestFirst(refs: FavoriteGifRef[]): FavoriteGifRef[] {
+    return [...refs].sort((a, b) => {
+        const ao = typeof a.order === "number" ? a.order : Number.NEGATIVE_INFINITY;
+        const bo = typeof b.order === "number" ? b.order : Number.NEGATIVE_INFINITY;
+        if (bo !== ao) return bo - ao;
+        // stable-ish fallback: url string so sort is deterministic
+        const au = a.src || a.url || "";
+        const bu = b.src || b.url || "";
+        return bu < au ? -1 : bu > au ? 1 : 0;
+    });
+}
+
+/** How many entries startup prefetch should aim for: 1/3 of max capacity. */
+export function prefetchTargetCount(maxEntries: number): number {
+    const max = Math.max(1, Math.floor(maxEntries));
+    return Math.max(1, Math.floor(max / 3));
 }
 
 export function cacheKeyForUrl(url: string) {

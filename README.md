@@ -36,7 +36,7 @@ Protected keys prefer to keep current Discord favorites when something must go.
 - **Max entries** — how many favorites to keep (default 500)
 - **Max megabytes** — total size budget (default 500 MB)
 - **Smart eviction** — when on, full cache can drop least-used GIFs for new favorites/sends; when off, nothing is deleted for new downloads
-- **Prefetch on start** — fill empty cache slots after Discord boots
+- **Prefetch on start** — after boot, download **newest** favorites first until the cache hits **1/3** of max capacity
 - **Rewrite favorite src** — swap cached favorites onto local `blob:` URLs for display
 
 ## Dev checks

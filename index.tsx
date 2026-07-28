@@ -15,6 +15,8 @@ import {
     isHeavyVideoUrl,
     isLikelyGifMediaUrl,
     keysForFavorite,
+    prefetchTargetCount,
+    sortFavoritesNewestFirst,
     type FavoriteGifRef,
 } from "./favorites";
 import {
@@ -199,7 +201,11 @@ async function applyMaxFromSettings() {
     await applyLimitsFromSettings();
 }
 
-/** Fill free slots only. Never evicts just to prefetch something new. */
+/**
+ * Startup auto-download:
+ * newest favorite first, walk older, stop once cache size hits 1/3 of max capacity.
+ * Never evicts during prefetch.
+ */
 async function prefetchFavorites() {
     try {
         const c = getCache();
@@ -211,35 +217,45 @@ async function prefetchFavorites() {
             await new Promise(r => setTimeout(r, 2000));
             refs = getFavoriteGifRefsFromFrecency();
         }
-        const queue = refs
-            .map(r => pickCacheableUrl(r))
-            .filter((u): u is string => !!u);
+
+        const target = prefetchTargetCount(c.getMaxEntries());
+        // already at / over 1/3 capacity — only warm blobs for newest slice
+        const newest = sortFavoritesNewestFirst(refs);
+        const queue: string[] = [];
+        const seen = new Set<string>();
+        for (const ref of newest) {
+            const u = pickCacheableUrl(ref);
+            if (!u) continue;
+            const key = cacheKeyForUrl(u);
+            if (seen.has(key)) continue;
+            seen.add(key);
+            queue.push(u);
+        }
         if (!queue.length) return;
 
-        let i = 0;
-        const concurrency = 4;
-
-        async function worker() {
-            while (i < queue.length) {
-                if (c.size() >= c.getMaxEntries()) return;
-                const idx = i++;
-                const url = queue[idx]!;
-                try {
-                    if (c.has(cacheKeyForUrl(url)) || c.has(url)) {
-                        c.ensureBlobUrlSync(cacheKeyForUrl(url), { bumpUsage: false });
-                        continue;
-                    }
-                    await ensureCached(c, url, { allowEvict: false });
-                    const key = cacheKeyForUrl(url);
-                    c.ensureBlobUrlSync(key, { bumpUsage: false });
-                    if (key !== url) c.ensureBlobUrlSync(url, { bumpUsage: false });
-                } catch {
-                    // skip bad urls
-                }
+        if (c.size() >= target) {
+            for (const url of queue.slice(0, target)) {
+                c.ensureBlobUrlSync(cacheKeyForUrl(url), { bumpUsage: false });
             }
+            return;
         }
 
-        await Promise.all(Array.from({ length: concurrency }, () => worker()));
+        // Sequential newest→older so we fill 1/3 with the latest gifs, not random workers
+        for (const url of queue) {
+            if (c.size() >= target) break;
+            try {
+                const key = cacheKeyForUrl(url);
+                if (c.has(key) || c.has(url)) {
+                    c.ensureBlobUrlSync(key, { bumpUsage: false });
+                    continue;
+                }
+                await ensureCached(c, url, { allowEvict: false });
+                c.ensureBlobUrlSync(key, { bumpUsage: false });
+                if (key !== url) c.ensureBlobUrlSync(url, { bumpUsage: false });
+            } catch {
+                // skip bad urls
+            }
+        }
         c.warmAllBlobUrls();
     } catch {
         // never take discord down
