@@ -36,7 +36,6 @@ import { cacheOnUserAction, ensureCached, installFetchInterceptor } from "./medi
 import { getPluginNative } from "./nativeApi";
 import { setUsageBarComponent, settings, settingsHooks } from "./settings";
 import { createBackendForPath } from "./storage";
-import managedStyle from "./style.css?managed";
 
 export { settings };
 
@@ -332,7 +331,6 @@ export default definePlugin({
     tags: ["GIF", "Media", "Performance"],
 
     settings,
-    managedStyle,
 
     patches: [
         {
@@ -357,33 +355,7 @@ export default definePlugin({
                 replace: "$&$self.onSelectGif($1);",
             },
         },
-        {
-            // Badge attrs on each GIF cell (ExtraContextMenusAPI hooks same render)
-            find: "renderEmptyFavorite",
-            replacement: {
-                match: /onClick:this\.handleClick,/,
-                replace: "$&...$self.gifNodeProps(this),",
-            },
-        },
     ],
-
-    /** Dev badges: data attrs for CSS LOCAL / BLOCKED labels */
-    gifNodeProps(instance: any) {
-        if (!settings.store.showCacheBadges) return {};
-        try {
-            const item = instance?.props?.item;
-            const url = resolveItemUrl(item);
-            if (!url) return {};
-            const local = isLocallyCached(url);
-            const denied = isAutoCacheDenied(url);
-            return {
-                "data-fgc-local": local ? "1" : "0",
-                "data-fgc-denied": denied ? "1" : "0",
-            };
-        } catch {
-            return {};
-        }
-    },
 
     /**
      * Right-click on GIF in picker (needs ExtraContextMenusAPI).
@@ -408,6 +380,7 @@ export default definePlugin({
                         id="fgc-remove-cache"
                         label="Remove from cache"
                         color="danger"
+                        disabled={!cached}
                         action={() => { void manualRemoveFromCache(url); }}
                     />
                 </Menu.MenuGroup>

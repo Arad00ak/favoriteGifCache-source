@@ -38,14 +38,13 @@ Protected keys prefer to keep current Discord favorites when something must go.
 - **Smart eviction** — when on, full cache can drop least-used GIFs for new favorites/sends; when off, nothing is deleted for new downloads
 - **Prefetch on start** — after boot, download **newest** favorites first until the cache hits **1/3** of max capacity
 - **Rewrite favorite src** — swap cached favorites onto local `blob:` URLs for display
-- **Show cache badges** (dev) — LOCAL / BLOCKED labels on picker GIFs
 
 ### GIF picker
 
 Right-click a GIF:
 
 - **Cache GIF** — store it now (disabled if already cached). Clears any “never auto-cache” block for that GIF.
-- **Remove from cache** — delete local copy and block auto/prefetch until you use **Cache GIF** again.
+- **Remove from cache** — delete local copy and block auto/prefetch until you use **Cache GIF** again (disabled if not cached).
 
 ## Dev checks
 
