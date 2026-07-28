@@ -96,6 +96,10 @@ export type EnsureCachedOptions = {
     fetchImpl?: typeof fetch;
     allowEvict?: boolean;
     maxBytes?: number;
+    /** Ignore denylist (manual "Cache GIF" action). */
+    force?: boolean;
+    /** Called to check auto-cache denylist. */
+    isDenied?: (url: string) => boolean;
 };
 
 /**
@@ -115,6 +119,9 @@ export async function ensureCached(
     const fetchImpl = opts.fetchImpl ?? fetch;
     const allowEvict = opts.allowEvict === true;
     const maxBytes = opts.maxBytes ?? MAX_ENTRY_BYTES;
+    const force = opts.force === true;
+
+    if (!force && opts.isDenied?.(url)) return null;
 
     const key = cacheKeyForUrl(url);
     const hit = await getCachedBytes(cache, url);
@@ -165,8 +172,14 @@ export async function cacheOnUserAction(
     cache: FavoriteGifCache,
     url: string,
     fetchImpl: typeof fetch = fetch,
+    opts: { force?: boolean; isDenied?: (url: string) => boolean; } = {},
 ) {
-    return ensureCached(cache, url, { fetchImpl, allowEvict: true });
+    return ensureCached(cache, url, {
+        fetchImpl,
+        allowEvict: true,
+        force: opts.force === true,
+        isDenied: opts.isDenied,
+    });
 }
 
 export async function resolveDisplayUrl(

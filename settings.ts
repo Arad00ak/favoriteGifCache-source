@@ -59,4 +59,9 @@ export const settings = definePluginSettings({
         description: "Point favorite thumbnails at local blob URLs when we have them cached",
         default: true,
     },
+    showCacheBadges: {
+        type: OptionType.BOOLEAN,
+        description: "Dev: show LOCAL / BLOCKED badges on GIFs in the picker",
+        default: false,
+    },
 });

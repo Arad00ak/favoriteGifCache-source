@@ -5,9 +5,16 @@
  */
 
 import definePlugin from "@utils/types";
+import { Menu, Toasts } from "@webpack/common";
 
 import { setActiveCache, setRebuildCache } from "./cacheAccess";
 import { CacheUsageBar } from "./CacheUsageBar";
+import {
+    allowAutoCache,
+    denyAutoCache,
+    isAutoCacheDenied,
+    loadDenylist,
+} from "./denylist";
 import {
     cacheKeyForUrl,
     getFavoriteGifRefsFromFrecency,
@@ -29,6 +36,7 @@ import { cacheOnUserAction, ensureCached, installFetchInterceptor } from "./medi
 import { getPluginNative } from "./nativeApi";
 import { setUsageBarComponent, settings, settingsHooks } from "./settings";
 import { createBackendForPath } from "./storage";
+import managedStyle from "./style.css?managed";
 
 export { settings };
 
@@ -201,6 +209,61 @@ async function applyMaxFromSettings() {
     await applyLimitsFromSettings();
 }
 
+function toast(message: string, type: any) {
+    try {
+        Toasts.show({ message, type, id: Toasts.genId() });
+    } catch {
+        // ignore
+    }
+}
+
+function resolveItemUrl(item: any): string | null {
+    if (!item) return null;
+    return pickCacheableUrl({
+        src: item.__fgcOriginalSrc || item.src,
+        url: item.__fgcOriginalUrl || item.url,
+        format: item.format,
+    }) || (typeof item.src === "string" && !item.src.startsWith("blob:") ? item.src : null)
+        || (typeof item.url === "string" && !item.url.startsWith("blob:") ? item.url : null);
+}
+
+function isLocallyCached(url: string) {
+    try {
+        const c = getCache();
+        const key = cacheKeyForUrl(url);
+        return c.has(key) || c.has(url);
+    } catch {
+        return false;
+    }
+}
+
+const autoCacheOpts = () => ({ isDenied: isAutoCacheDenied });
+
+async function manualCacheGif(url: string) {
+    await allowAutoCache(url);
+    const c = getCache();
+    await c.init();
+    const res = await cacheOnUserAction(c, url, fetch, { force: true });
+    if (res?.stored || c.has(cacheKeyForUrl(url))) {
+        c.ensureBlobUrlSync(cacheKeyForUrl(url), { bumpUsage: true });
+        toast("GIF cached", Toasts.Type.SUCCESS);
+        safeForceUpdate(lastPickerInstance);
+    } else {
+        toast("Could not cache GIF", Toasts.Type.FAILURE);
+    }
+}
+
+async function manualRemoveFromCache(url: string) {
+    const c = getCache();
+    await c.init();
+    const key = cacheKeyForUrl(url);
+    await c.delete(key);
+    if (key !== url) await c.delete(url);
+    await denyAutoCache(url);
+    toast("Removed from cache — won't auto-cache again", Toasts.Type.SUCCESS);
+    safeForceUpdate(lastPickerInstance);
+}
+
 /**
  * Startup auto-download:
  * newest favorite first, walk older, stop once cache size hits 1/3 of max capacity.
@@ -249,7 +312,7 @@ async function prefetchFavorites() {
                     c.ensureBlobUrlSync(key, { bumpUsage: false });
                     continue;
                 }
-                await ensureCached(c, url, { allowEvict: false });
+                await ensureCached(c, url, { allowEvict: false, ...autoCacheOpts() });
                 c.ensureBlobUrlSync(key, { bumpUsage: false });
                 if (key !== url) c.ensureBlobUrlSync(url, { bumpUsage: false });
             } catch {
@@ -269,6 +332,7 @@ export default definePlugin({
     tags: ["GIF", "Media", "Performance"],
 
     settings,
+    managedStyle,
 
     patches: [
         {
@@ -293,7 +357,65 @@ export default definePlugin({
                 replace: "$&$self.onSelectGif($1);",
             },
         },
+        {
+            // Badge attrs on each GIF cell (ExtraContextMenusAPI hooks same render)
+            find: "renderEmptyFavorite",
+            replacement: {
+                match: /onClick:this\.handleClick,/,
+                replace: "$&...$self.gifNodeProps(this),",
+            },
+        },
     ],
+
+    /** Dev badges: data attrs for CSS LOCAL / BLOCKED labels */
+    gifNodeProps(instance: any) {
+        if (!settings.store.showCacheBadges) return {};
+        try {
+            const item = instance?.props?.item;
+            const url = resolveItemUrl(item);
+            if (!url) return {};
+            const local = isLocallyCached(url);
+            const denied = isAutoCacheDenied(url);
+            return {
+                "data-fgc-local": local ? "1" : "0",
+                "data-fgc-denied": denied ? "1" : "0",
+            };
+        } catch {
+            return {};
+        }
+    },
+
+    /**
+     * Right-click on GIF in picker (needs ExtraContextMenusAPI).
+     */
+    gifPickerContextMenu(instance: any) {
+        try {
+            const item = instance?.props?.item;
+            const url = resolveItemUrl(item);
+            if (!url || !isLikelyGifMediaUrl(url)) return null;
+
+            const cached = isLocallyCached(url);
+
+            return (
+                <Menu.MenuGroup>
+                    <Menu.MenuItem
+                        id="fgc-cache-gif"
+                        label="Cache GIF"
+                        disabled={cached}
+                        action={() => { void manualCacheGif(url); }}
+                    />
+                    <Menu.MenuItem
+                        id="fgc-remove-cache"
+                        label="Remove from cache"
+                        color="danger"
+                        action={() => { void manualRemoveFromCache(url); }}
+                    />
+                </Menu.MenuGroup>
+            );
+        } catch {
+            return null;
+        }
+    },
 
     /**
      * User clicked a GIF to send. If it is a favorite and not cached yet,
@@ -319,6 +441,8 @@ export default definePlugin({
 
             const c = getCache();
             const key = cacheKeyForUrl(remote);
+            if (isAutoCacheDenied(remote)) return;
+
             if (c.has(key) || c.has(remote)) {
                 c.touchSync(key) || c.touchSync(remote);
                 return;
@@ -327,7 +451,7 @@ export default definePlugin({
             void (async () => {
                 try {
                     await c.init();
-                    await cacheOnUserAction(c, remote);
+                    await cacheOnUserAction(c, remote, fetch, autoCacheOpts());
                     c.ensureBlobUrlSync(cacheKeyForUrl(remote), { bumpUsage: true });
                 } catch {
                     // send still works without cache
@@ -368,9 +492,9 @@ export default definePlugin({
                     // (still skip mp4/video — those stay on the network)
                     for (const u of newlyFavorited) {
                         const cacheUrl = pickCacheableUrl({ src: u, url: u });
-                        if (!cacheUrl) continue;
+                        if (!cacheUrl || isAutoCacheDenied(cacheUrl)) continue;
                         try {
-                            await cacheOnUserAction(c, cacheUrl);
+                            await cacheOnUserAction(c, cacheUrl, fetch, autoCacheOpts());
                             const key = cacheKeyForUrl(cacheUrl);
                             c.ensureBlobUrlSync(key, { bumpUsage: false });
                         } catch {
@@ -380,13 +504,13 @@ export default definePlugin({
 
                     for (const ref of refs) {
                         const u = pickCacheableUrl(ref);
-                        if (!u) continue;
+                        if (!u || isAutoCacheDenied(u)) continue;
                         const key = cacheKeyForUrl(u);
 
                         // Scrolling: only fill free slots, never thrash-evict
                         if (!c.has(key) && !c.has(u)) {
                             if (c.size() < c.getMaxEntries()) {
-                                await ensureCached(c, u, { allowEvict: false });
+                                await ensureCached(c, u, { allowEvict: false, ...autoCacheOpts() });
                             }
                         }
 
@@ -426,6 +550,7 @@ export default definePlugin({
 
     async start() {
         try {
+            await loadDenylist();
             // loads IndexedDB from last session — does not wipe on restart
             await applyMaxFromSettings();
             refreshFavoriteSet();
