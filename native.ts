@@ -55,6 +55,71 @@ export function getDefaultCacheDir() {
     return join(app.getPath("userData"), "FavoriteGifCache");
 }
 
+/** Hosts we are willing to pull favorite media from (main process = no CORS). */
+const ALLOWED_MEDIA_HOSTS = [
+    "media.tenor.com",
+    "tenor.com",
+    "c.tenor.com",
+    "media.giphy.com",
+    "media0.giphy.com",
+    "media1.giphy.com",
+    "media2.giphy.com",
+    "media3.giphy.com",
+    "media4.giphy.com",
+    "i.giphy.com",
+    "media.discordapp.net",
+    "cdn.discordapp.com",
+    "images-ext-1.discordapp.net",
+    "images-ext-2.discordapp.net",
+    "discordapp.net",
+    "discord.com",
+];
+
+const DEFAULT_MAX_DOWNLOAD = 12 * 1024 * 1024; // 12 MB
+
+function hostAllowed(hostname: string) {
+    const h = hostname.toLowerCase();
+    return ALLOWED_MEDIA_HOSTS.some(a => h === a || h.endsWith("." + a));
+}
+
+/**
+ * Download favorite media in the Electron main process (bypasses renderer CORS).
+ * Rejects oversized files so huge mp4s never enter the cache.
+ */
+export async function fetchMedia(
+    _e: unknown,
+    url: string,
+    maxBytes: number = DEFAULT_MAX_DOWNLOAD,
+): Promise<{ data: ArrayBuffer; type: string; } | null> {
+    if (!url || typeof url !== "string") return null;
+    let parsed: URL;
+    try {
+        parsed = new URL(url);
+    } catch {
+        return null;
+    }
+    if (parsed.protocol !== "https:" && parsed.protocol !== "http:") return null;
+    if (!hostAllowed(parsed.hostname)) return null;
+
+    const res = await fetch(parsed.href, {
+        headers: { Accept: "image/*,video/*,*/*;q=0.8" },
+        redirect: "follow",
+    });
+    if (!res.ok) return null;
+
+    const lenHeader = res.headers.get("content-length");
+    if (lenHeader) {
+        const len = Number(lenHeader);
+        if (Number.isFinite(len) && len > maxBytes) return null;
+    }
+
+    const buf = await res.arrayBuffer();
+    if (!buf.byteLength || buf.byteLength > maxBytes) return null;
+
+    const type = (res.headers.get("content-type") || "application/octet-stream").split(";")[0]!.trim();
+    return { data: buf, type };
+}
+
 export async function pickCacheDirectory(_e: unknown, defaultPath?: string) {
     const res = await dialog.showOpenDialog({
         title: "Choose FavoriteGifCache folder",

@@ -53,4 +53,4 @@ npm run smoke
 
 First open of a brand-new favorite still needs the network once. Webpack renames in Discord can break the picker patch; if that happens, favorites fall back to normal remote loads instead of hard-failing the UI.
 
-**MP4 / video "gifs" are not cached.** Discord often plays favorites as `.mp4`, and those files are huge. The plugin only stores image-style media (gif/webp/png/jpeg). Videos still show through Discord's normal network path.
+Downloads use the **desktop native helper** when possible (avoids Discord renderer CORS, which silently blocked caching before). Each file is capped (~12 MB) so giant videos are skipped; normal Tenor/Discord favorites still cache.

@@ -7,22 +7,18 @@ import {
     isHeavyVideoUrl,
 } from "../favorites.ts";
 import { createFavoriteGifCache, MemoryStorageBackend } from "../gifCache.ts";
-import { cacheOnUserAction, ensureCached } from "../media.ts";
+import { ensureCached, MAX_ENTRY_BYTES } from "../media.ts";
 
-describe("skip heavy video (mp4) from cache", () => {
-    it("detects mp4/webm urls", () => {
+describe("media size / video rules", () => {
+    it("detects mp4 urls but still treats tenor hosts as cache candidates", () => {
         assert.equal(isHeavyVideoUrl("https://media.tenor.com/foo.mp4"), true);
-        assert.equal(isHeavyVideoUrl("https://media.tenor.com/foo.webm"), true);
         assert.equal(isHeavyVideoUrl("https://media.tenor.com/foo.gif"), false);
-        assert.equal(isCacheableFavoriteUrl("https://media.tenor.com/foo.mp4"), false);
+        assert.equal(isCacheableFavoriteUrl("https://media.tenor.com/foo.mp4"), true);
         assert.equal(isCacheableFavoriteUrl("https://media.tenor.com/foo.gif"), true);
         assert.equal(isHeavyVideoMime("video/mp4"), true);
-        assert.equal(isHeavyVideoMime("image/gif"), false);
     });
 
-    it("IMAGE format (1) is still cacheable; only VIDEO (2) is skipped by format", async () => {
-        // regression: we used to treat format !== 0 as video, which blocked format=1 images
-        const { createFavoriteGifCache, MemoryStorageBackend } = await import("../gifCache.ts");
+    it("stores normal gif bytes", async () => {
         const cache = createFavoriteGifCache({
             maxEntries: 10,
             backend: new MemoryStorageBackend(),
@@ -37,74 +33,38 @@ describe("skip heavy video (mp4) from cache", () => {
         assert.equal(cache.size(), 1);
     });
 
-    it("ensureCached never fetches mp4 bodies into the store", async () => {
+    it("stores small video/gif mp4 under the per-file cap", async () => {
         const cache = createFavoriteGifCache({
             maxEntries: 10,
             backend: new MemoryStorageBackend(),
         });
-        let fetchCalls = 0;
-        const fakeFetch: typeof fetch = async () => {
-            fetchCalls += 1;
-            return new Response(new Uint8Array([1, 2, 3, 4]), {
+        const body = new Uint8Array(1024);
+        const fakeFetch: typeof fetch = async () =>
+            new Response(body, {
                 status: 200,
                 headers: { "Content-Type": "video/mp4" },
             });
-        };
+        const res = await ensureCached(cache, "https://media.tenor.com/clip.mp4", fakeFetch);
+        assert.ok(res?.stored, "small tenor mp4 should cache");
+        assert.equal(cache.size(), 1);
+    });
 
+    it("rejects oversized files", async () => {
+        const cache = createFavoriteGifCache({
+            maxEntries: 10,
+            backend: new MemoryStorageBackend(),
+        });
+        const huge = new Uint8Array(MAX_ENTRY_BYTES + 100);
+        const fakeFetch: typeof fetch = async () =>
+            new Response(huge, {
+                status: 200,
+                headers: {
+                    "Content-Type": "video/mp4",
+                    "Content-Length": String(huge.byteLength),
+                },
+            });
         const res = await ensureCached(cache, "https://media.tenor.com/huge.mp4", fakeFetch);
         assert.equal(res, null);
-        assert.equal(fetchCalls, 0, "must bail before network for .mp4 urls");
-        assert.equal(cache.size(), 0);
-    });
-
-    it("rejects video content-type even if url looks generic", async () => {
-        const cache = createFavoriteGifCache({
-            maxEntries: 10,
-            backend: new MemoryStorageBackend(),
-        });
-        let fetchCalls = 0;
-        const fakeFetch: typeof fetch = async () => {
-            fetchCalls += 1;
-            return new Response(new Uint8Array(100), {
-                status: 200,
-                headers: { "Content-Type": "video/mp4" },
-            });
-        };
-
-        // path has no extension; host is tenor so isLikelyGifMediaUrl is true
-        // but response is video → do not store (and we abort before buffering if mime known)
-        const res = await ensureCached(
-            cache,
-            "https://media.tenor.com/SomeHash/AAAAC/",
-            fakeFetch,
-        );
-        // may fetch once to learn mime, but must not store
-        assert.equal(res, null);
-        assert.equal(cache.size(), 0);
-        assert.ok(fetchCalls <= 1);
-    });
-
-    it("cacheOnUserAction also skips mp4", async () => {
-        const cache = createFavoriteGifCache({
-            maxEntries: 10,
-            backend: new MemoryStorageBackend(),
-        });
-        let fetchCalls = 0;
-        const fakeFetch: typeof fetch = async () => {
-            fetchCalls += 1;
-            return new Response(new Uint8Array(50), {
-                status: 200,
-                headers: { "Content-Type": "video/mp4" },
-            });
-        };
-
-        const res = await cacheOnUserAction(
-            cache,
-            "https://cdn.discordapp.com/attachments/1/2/clip.mp4",
-            fakeFetch,
-        );
-        assert.equal(res, null);
-        assert.equal(fetchCalls, 0);
         assert.equal(cache.size(), 0);
     });
 });

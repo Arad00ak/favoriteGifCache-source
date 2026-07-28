@@ -144,26 +144,19 @@ function isTrackedFavorite(url: string) {
     return favoriteUrlSet.has(url) || favoriteUrlSet.has(cacheKeyForUrl(url));
 }
 
-/**
- * Discord favorite format (see gifCollections): IMAGE = 1, VIDEO = 2.
- * Older blobs may use 0 for image. Only 2 is video.
- */
-function isVideoFavoriteFormat(format?: number) {
-    return format === 2;
-}
-
-function shouldCacheFavoriteUrl(url: string, format?: number) {
+function shouldCacheFavoriteUrl(url: string, _format?: number) {
     if (!url || url.startsWith("blob:") || url.startsWith("data:")) return false;
-    if (isVideoFavoriteFormat(format)) return false;
-    if (isHeavyVideoUrl(url) || !isCacheableFavoriteUrl(url)) return false;
-    return true;
+    // Size filter happens at download time — don't block Tenor mp4 "gifs" by format alone
+    return isCacheableFavoriteUrl(url) || isLikelyGifMediaUrl(url);
 }
 
-/** Prefer a non-video src/url for caching when both exist. */
+/** Prefer image-like urls when both src and url exist; otherwise first media url. */
 function pickCacheableUrl(ref: { src?: string; url?: string; format?: number; }): string | null {
     const candidates = [ref.src, ref.url].filter((u): u is string => !!u && typeof u === "string");
+    const nonVideo = candidates.filter(u => shouldCacheFavoriteUrl(u) && !isHeavyVideoUrl(u));
+    if (nonVideo.length) return nonVideo[0]!;
     for (const u of candidates) {
-        if (shouldCacheFavoriteUrl(u, ref.format)) return u;
+        if (shouldCacheFavoriteUrl(u)) return u;
     }
     return null;
 }
@@ -212,12 +205,19 @@ async function prefetchFavorites() {
         const c = getCache();
         await c.init();
         refreshFavoriteSet();
-        const refs = getFavoriteGifRefsFromFrecency();
+        let refs = getFavoriteGifRefsFromFrecency();
+        // Frecency can be empty early in boot — retry once
+        if (!refs.length) {
+            await new Promise(r => setTimeout(r, 2000));
+            refs = getFavoriteGifRefsFromFrecency();
+        }
         const queue = refs
             .map(r => pickCacheableUrl(r))
             .filter((u): u is string => !!u);
+        if (!queue.length) return;
+
         let i = 0;
-        const concurrency = 3;
+        const concurrency = 4;
 
         async function worker() {
             while (i < queue.length) {
@@ -225,6 +225,10 @@ async function prefetchFavorites() {
                 const idx = i++;
                 const url = queue[idx]!;
                 try {
+                    if (c.has(cacheKeyForUrl(url)) || c.has(url)) {
+                        c.ensureBlobUrlSync(cacheKeyForUrl(url), { bumpUsage: false });
+                        continue;
+                    }
                     await ensureCached(c, url, { allowEvict: false });
                     const key = cacheKeyForUrl(url);
                     c.ensureBlobUrlSync(key, { bumpUsage: false });
@@ -255,14 +259,18 @@ export default definePlugin({
             find: "renderHeaderContent()",
             replacement: [
                 {
-                    // same favorites injection point FavoriteGifSearch uses
+                    // plain favorites: ...
                     match: /(,suggestions:\i,favorites:)(\i),/,
+                    replace: "$1$self.wrapFavorites(this,$2),",
+                },
+                {
+                    // after FavoriteGifSearch: favorites:$self.getFav(x),
+                    match: /(,suggestions:\i,favorites:)(\i\.getFav\(\i\)),/,
                     replace: "$1$self.wrapFavorites(this,$2),",
                 },
             ],
         },
         {
-            // When the user clicks a GIF to send it
             find: "handleSelectGIF=",
             replacement: {
                 match: /handleSelectGIF=(\i)=>\{/,
@@ -376,7 +384,12 @@ export default definePlugin({
                             if (cacheKeyForUrl(orig) === key || orig === u || orig === key) {
                                 if (gif.src !== blob) {
                                     if (!gif.__fgcOriginalSrc) gif.__fgcOriginalSrc = gif.src || orig;
+                                    if (!gif.__fgcOriginalUrl && gif.url) gif.__fgcOriginalUrl = gif.url;
                                     gif.src = blob;
+                                    // some builds read .url for the media element
+                                    if (typeof gif.url === "string" && !gif.url.startsWith("blob:")) {
+                                        gif.url = blob;
+                                    }
                                     c.touchSync(key) || c.touchSync(u);
                                     changed = true;
                                 }
@@ -403,9 +416,12 @@ export default definePlugin({
             uninstallFetch = installFetchInterceptor(getCache(), isTrackedFavorite);
 
             if (settings.store.prefetchOnStart) {
+                // sooner + one backup pass so boot races with Frecency still fill the cache
                 prefetchTimer = setTimeout(() => {
-                    void prefetchFavorites();
-                }, 2500);
+                    void prefetchFavorites().then(() => {
+                        setTimeout(() => void prefetchFavorites(), 8000);
+                    });
+                }, 1200);
             }
         } catch (e) {
             console.error("[FavoriteGifCache] failed to start", e);

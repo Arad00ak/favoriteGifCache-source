@@ -109,18 +109,15 @@ export function isLikelyGifMediaUrl(url: string) {
 }
 
 /**
- * Heavy video "gifs" (mp4/webm) — leave them to Discord's network.
- * They blow up cache size; we only store real image GIFs/webp/png/jpeg.
+ * URL looks like an explicit video file.
+ * Small Tenor mp4 "gifs" may still be cached if under the per-file size cap in media.ts.
  */
 export function isHeavyVideoUrl(url: string) {
     if (!url || typeof url !== "string") return false;
     if (url.startsWith("blob:") || url.startsWith("data:")) return false;
     try {
         const path = new URL(url).pathname.toLowerCase();
-        if (/\.(mp4|webm|mov|m4v)(\?|$)/i.test(path)) return true;
-        // tenor/giphy often omit extension; still catch obvious video path markers
-        if (/\/video\//i.test(path) || /-mp4/i.test(path)) return true;
-        return false;
+        return /\.(mp4|webm|mov|m4v)(\?|$)/i.test(path);
     } catch {
         return /\.(mp4|webm|mov|m4v)(\?|$)/i.test(url);
     }
@@ -132,7 +129,7 @@ export function isHeavyVideoMime(mime: string | null | undefined) {
     return m.startsWith("video/") || m === "application/mp4";
 }
 
-/** Safe to download into the on-disk favorite cache. */
+/** URL is a candidate for the favorite cache (size limits applied at download time). */
 export function isCacheableFavoriteUrl(url: string) {
-    return isLikelyGifMediaUrl(url) && !isHeavyVideoUrl(url);
+    return isLikelyGifMediaUrl(url);
 }

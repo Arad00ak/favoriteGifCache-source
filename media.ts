@@ -6,8 +6,12 @@ import {
     isHeavyVideoUrl,
     isLikelyGifMediaUrl,
 } from "./favorites";
+import { getPluginNative } from "./nativeApi";
 
-const inflight = new Map<string, Promise<Uint8Array | null>>();
+const inflight = new Map<string, Promise<{ data: Uint8Array; mime: string; } | null>>();
+
+/** Skip single files bigger than this (huge "gif" mp4s). */
+export const MAX_ENTRY_BYTES = 12 * 1024 * 1024;
 
 function guessMime(url: string, contentType: string | null) {
     if (contentType && !contentType.includes("octet-stream")) {
@@ -23,52 +27,98 @@ function guessMime(url: string, contentType: string | null) {
     return "image/gif";
 }
 
-export async function getCachedBytes(cache: FavoriteGifCache, url: string) {
-    const key = cacheKeyForUrl(url);
-    const entry = await cache.get(key);
-    if (entry) return { data: entry.data, mimeType: entry.mimeType, key };
-
-    if (key !== url) {
-        const entry2 = await cache.get(url);
-        if (entry2) return { data: entry2.data, mimeType: entry2.mimeType, key: url };
+/**
+ * Pull bytes for a favorite media URL.
+ * Prefers native (main process) so Discord renderer CORS cannot block Tenor/CDN.
+ */
+export async function downloadFavoriteMedia(
+    url: string,
+    fetchImpl: typeof fetch = fetch,
+    maxBytes = MAX_ENTRY_BYTES,
+): Promise<{ data: Uint8Array; mime: string; } | null> {
+    const native = getPluginNative();
+    if (native && typeof (native as any).fetchMedia === "function") {
+        try {
+            const res = await (native as any).fetchMedia(url, maxBytes);
+            if (res?.data) {
+                const data = res.data instanceof ArrayBuffer
+                    ? new Uint8Array(res.data)
+                    : new Uint8Array(res.data);
+                if (data.byteLength && data.byteLength <= maxBytes) {
+                    return {
+                        data,
+                        mime: guessMime(url, res.type || null),
+                    };
+                }
+            }
+        } catch {
+            // fall through to renderer fetch
+        }
     }
+
+    try {
+        const res = await fetchImpl(url, {
+            // omit cors mode — let Electron use default; strict cors often fails here
+            credentials: "include",
+            cache: "force-cache",
+        } as RequestInit);
+        if (!res.ok) return null;
+        const mime = guessMime(url, res.headers.get("content-type"));
+        const buf = new Uint8Array(await res.arrayBuffer());
+        if (!buf.byteLength || buf.byteLength > maxBytes) return null;
+        return { data: buf, mime };
+    } catch {
+        return null;
+    }
+}
+
+export async function getCachedBytes(cache: FavoriteGifCache, url: string) {
+    await cache.init();
+    const key = cacheKeyForUrl(url);
+
+    // peek first so miss path does not thrash metadata writes
+    let entry = cache.peekSync(key);
+    if (!entry && key !== url) entry = cache.peekSync(url);
+
+    if (entry) {
+        // record usage on real hit
+        cache.touchSync(entry.key);
+        if (isHeavyVideoMime(entry.mimeType) && entry.size > MAX_ENTRY_BYTES) {
+            return null;
+        }
+        return { data: entry.data.slice(), mimeType: entry.mimeType, key: entry.key };
+    }
+
     return null;
 }
 
 export type EnsureCachedOptions = {
     fetchImpl?: typeof fetch;
-    /**
-     * If the cache is full, still try to store by evicting.
-     * Default false: when full we leave existing entries alone and skip the write.
-     */
     allowEvict?: boolean;
+    maxBytes?: number;
 };
 
 /**
  * Hit → local bytes.
- * Miss → download once; store only if there is room (or allowEvict).
- * When full without eviction we still return the downloaded bytes for this paint,
- * but we do not kick anything out of the cache.
+ * Miss → download once (native preferred), store if under size/cap rules.
  */
 export async function ensureCached(
     cache: FavoriteGifCache,
     url: string,
     fetchImplOrOpts: typeof fetch | EnsureCachedOptions = fetch,
 ) {
-    // Never pull mp4/webm into the cache — too fat for a GIF album
-    if (!url || !isCacheableFavoriteUrl(url) || isHeavyVideoUrl(url)) return null;
+    if (!url || !isLikelyGifMediaUrl(url)) return null;
 
     const opts: EnsureCachedOptions = typeof fetchImplOrOpts === "function"
         ? { fetchImpl: fetchImplOrOpts }
         : fetchImplOrOpts;
     const fetchImpl = opts.fetchImpl ?? fetch;
     const allowEvict = opts.allowEvict === true;
+    const maxBytes = opts.maxBytes ?? MAX_ENTRY_BYTES;
 
     const key = cacheKeyForUrl(url);
     const hit = await getCachedBytes(cache, url);
     if (hit) {
-        // legacy bad entry (video stored before this rule) — don't keep serving as "good"
-        if (isHeavyVideoMime(hit.mimeType)) return null;
         return { ...hit, fromCache: true as const, stored: true as const };
     }
 
@@ -76,17 +126,7 @@ export async function ensureCached(
     if (!pending) {
         pending = (async () => {
             try {
-                const res = await fetchImpl(url, { credentials: "omit", mode: "cors" as RequestMode });
-                if (!res.ok) return null;
-                const mime = guessMime(url, res.headers.get("content-type"));
-                if (isHeavyVideoMime(mime) || isHeavyVideoUrl(url)) {
-                    // don't even buffer the body into our cache path
-                    return null;
-                }
-                const buf = new Uint8Array(await res.arrayBuffer());
-                if (!buf.byteLength) return null;
-                await cache.put(key, buf, mime, { allowEvict });
-                return buf;
+                return await downloadFavoriteMedia(url, fetchImpl, maxBytes);
             } catch {
                 return null;
             } finally {
@@ -96,32 +136,31 @@ export async function ensureCached(
         inflight.set(key, pending);
     }
 
-    const data = await pending;
-    if (!data) return null;
+    const downloaded = await pending;
+    if (!downloaded) return null;
 
-    // Another call may have fetched with allowEvict:false while full.
-    // If we need a durable slot now, force a put with eviction.
-    let entry = await cache.peek(key);
+    // Skip only truly huge videos; normal Tenor "gif" mp4s under the cap are OK
+    if (downloaded.data.byteLength > maxBytes) {
+        return null;
+    }
+
+    await cache.put(key, downloaded.data, downloaded.mime, { allowEvict });
+
+    let entry = cache.peekSync(key);
     if (!entry && allowEvict) {
-        const mime = guessMime(url, null);
-        if (isHeavyVideoMime(mime)) return null;
-        await cache.put(key, data, mime, { allowEvict: true });
-        entry = await cache.peek(key);
+        await cache.put(key, downloaded.data, downloaded.mime, { allowEvict: true });
+        entry = cache.peekSync(key);
     }
 
     return {
-        data,
-        mimeType: entry?.mimeType || guessMime(url, null),
+        data: downloaded.data,
+        mimeType: entry?.mimeType || downloaded.mime,
         key,
         fromCache: false as const,
         stored: !!entry,
     };
 }
 
-/**
- * Cache a favorite for a deliberate user action (new favorite or send).
- * May evict least-used when full. Scroll/prefetch should keep using allowEvict:false.
- */
 export async function cacheOnUserAction(
     cache: FavoriteGifCache,
     url: string,
@@ -142,7 +181,7 @@ export async function resolveDisplayUrl(
     const hot = cache.getCachedBlobUrl(cacheKeyForUrl(originalUrl))
         ?? cache.getCachedBlobUrl(originalUrl);
     if (hot) {
-        void cache.get(cacheKeyForUrl(originalUrl));
+        cache.touchSync(cacheKeyForUrl(originalUrl));
         return hot;
     }
 
@@ -163,7 +202,6 @@ export async function resolveDisplayUrl(
             const b = await cache.getBlobUrl(ensured.key);
             return b || originalUrl;
         }
-        // downloaded but not stored (cache full) — one-shot blob, not kept
         if (typeof Blob !== "undefined" && typeof URL !== "undefined" && URL.createObjectURL) {
             try {
                 return URL.createObjectURL(new Blob([ensured.data], { type: ensured.mimeType }));
@@ -209,7 +247,7 @@ export function installFetchInterceptor(
                 }
             }
         } catch {
-            // fall through to network
+            // fall through
         }
         return original(input as any, init);
     };
