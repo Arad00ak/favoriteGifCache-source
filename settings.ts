@@ -35,11 +35,12 @@ export const settings = definePluginSettings({
         default: 500,
         onChange: () => settingsHooks.onLimitsChange(),
     },
+    // Path is only set via Choose folder button — keep store, hide text field
     cacheDirectory: {
         type: OptionType.STRING,
-        description: "Cache folder path (or use Choose folder above)",
+        description: "Cache folder path",
         default: "",
-        placeholder: "Empty = default IndexedDB",
+        hidden: true,
         onChange: () => settingsHooks.onCacheDirectoryChange(),
     },
     smartEviction: {

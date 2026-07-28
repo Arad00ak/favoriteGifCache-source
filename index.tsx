@@ -144,15 +144,28 @@ function isTrackedFavorite(url: string) {
     return favoriteUrlSet.has(url) || favoriteUrlSet.has(cacheKeyForUrl(url));
 }
 
-/** Discord favorite format: 0 ≈ image gif; anything else is usually video/mp4. */
+/**
+ * Discord favorite format (see gifCollections): IMAGE = 1, VIDEO = 2.
+ * Older blobs may use 0 for image. Only 2 is video.
+ */
 function isVideoFavoriteFormat(format?: number) {
-    return typeof format === "number" && format !== 0;
+    return format === 2;
 }
 
 function shouldCacheFavoriteUrl(url: string, format?: number) {
-    if (!url || isHeavyVideoUrl(url) || !isCacheableFavoriteUrl(url)) return false;
+    if (!url || url.startsWith("blob:") || url.startsWith("data:")) return false;
     if (isVideoFavoriteFormat(format)) return false;
+    if (isHeavyVideoUrl(url) || !isCacheableFavoriteUrl(url)) return false;
     return true;
+}
+
+/** Prefer a non-video src/url for caching when both exist. */
+function pickCacheableUrl(ref: { src?: string; url?: string; format?: number; }): string | null {
+    const candidates = [ref.src, ref.url].filter((u): u is string => !!u && typeof u === "string");
+    for (const u of candidates) {
+        if (shouldCacheFavoriteUrl(u, ref.format)) return u;
+    }
+    return null;
 }
 
 function originalSrc(gif: any) {
@@ -201,9 +214,8 @@ async function prefetchFavorites() {
         refreshFavoriteSet();
         const refs = getFavoriteGifRefsFromFrecency();
         const queue = refs
-            .filter(r => shouldCacheFavoriteUrl(r.src || r.url, r.format))
-            .map(r => r.src || r.url)
-            .filter(Boolean) as string[];
+            .map(r => pickCacheableUrl(r))
+            .filter((u): u is string => !!u);
         let i = 0;
         const concurrency = 3;
 
@@ -263,17 +275,23 @@ export default definePlugin({
      * User clicked a GIF to send. If it is a favorite and not cached yet,
      * store it (may evict least-used when full).
      */
-    onSelectGif(gif?: { url?: string; src?: string; __fgcOriginalSrc?: string; __fgcOriginalUrl?: string; }) {
+    onSelectGif(gif?: { url?: string; src?: string; format?: number; __fgcOriginalSrc?: string; __fgcOriginalUrl?: string; }) {
         try {
             if (!gif) return;
-            const remote =
-                gif.__fgcOriginalUrl
-                || gif.__fgcOriginalSrc
-                || (typeof gif.url === "string" && !gif.url.startsWith("blob:") ? gif.url : "")
-                || (typeof gif.src === "string" && !gif.src.startsWith("blob:") ? gif.src : "")
-                || "";
-            if (!remote || !shouldCacheFavoriteUrl(remote, (gif as any)?.format)) return;
-            if (!isTrackedFavorite(remote)) return;
+            const remote = pickCacheableUrl({
+                src: gif.__fgcOriginalSrc
+                    || (typeof gif.src === "string" && !gif.src.startsWith("blob:") ? gif.src : "")
+                    || undefined,
+                url: gif.__fgcOriginalUrl
+                    || (typeof gif.url === "string" && !gif.url.startsWith("blob:") ? gif.url : "")
+                    || undefined,
+                format: gif.format,
+            });
+            if (!remote) return;
+            if (!isTrackedFavorite(remote) && !isTrackedFavorite(gif.url || "") && !isTrackedFavorite(gif.src || "")) {
+                // still cache if it looks like a favorite media host from picker
+                if (!isLikelyGifMediaUrl(remote)) return;
+            }
 
             const c = getCache();
             const key = cacheKeyForUrl(remote);
@@ -325,10 +343,11 @@ export default definePlugin({
                     // Brand-new favorites may steal a slot from least-used when full
                     // (still skip mp4/video — those stay on the network)
                     for (const u of newlyFavorited) {
-                        if (!shouldCacheFavoriteUrl(u)) continue;
+                        const cacheUrl = pickCacheableUrl({ src: u, url: u });
+                        if (!cacheUrl) continue;
                         try {
-                            await cacheOnUserAction(c, u);
-                            const key = cacheKeyForUrl(u);
+                            await cacheOnUserAction(c, cacheUrl);
+                            const key = cacheKeyForUrl(cacheUrl);
                             c.ensureBlobUrlSync(key, { bumpUsage: false });
                         } catch {
                             // ignore single failures
@@ -336,9 +355,8 @@ export default definePlugin({
                     }
 
                     for (const ref of refs) {
-                        const u = ref.src || ref.url;
-                        if (!u || u.startsWith("blob:")) continue;
-                        if (!shouldCacheFavoriteUrl(u, ref.format)) continue;
+                        const u = pickCacheableUrl(ref);
+                        if (!u) continue;
                         const key = cacheKeyForUrl(u);
 
                         // Scrolling: only fill free slots, never thrash-evict

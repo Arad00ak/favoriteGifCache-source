@@ -20,6 +20,23 @@ describe("skip heavy video (mp4) from cache", () => {
         assert.equal(isHeavyVideoMime("image/gif"), false);
     });
 
+    it("IMAGE format (1) is still cacheable; only VIDEO (2) is skipped by format", async () => {
+        // regression: we used to treat format !== 0 as video, which blocked format=1 images
+        const { createFavoriteGifCache, MemoryStorageBackend } = await import("../gifCache.ts");
+        const cache = createFavoriteGifCache({
+            maxEntries: 10,
+            backend: new MemoryStorageBackend(),
+        });
+        const fakeFetch: typeof fetch = async () =>
+            new Response(new TextEncoder().encode("GIFDATA"), {
+                status: 200,
+                headers: { "Content-Type": "image/gif" },
+            });
+        const res = await ensureCached(cache, "https://media.tenor.com/still-image.gif", fakeFetch);
+        assert.ok(res?.stored);
+        assert.equal(cache.size(), 1);
+    });
+
     it("ensureCached never fetches mp4 bodies into the store", async () => {
         const cache = createFavoriteGifCache({
             maxEntries: 10,
