@@ -9,7 +9,8 @@
   "scripts": {
     "test": "tsx --test tests/*.test.ts",
     "smoke": "tsx scripts/smoke.ts",
-    "verify": "npm test && npm run smoke"
+    "verify": "npm test && npm run smoke",
+    "bundle:userplugin": "node scripts/bundle-userplugin.mjs"
   },
   "devDependencies": {
     "@types/node": "^22.13.10",
