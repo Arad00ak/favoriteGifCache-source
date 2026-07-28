@@ -5,7 +5,7 @@ import {
     prefetchTargetCount,
     sortFavoritesNewestFirst,
     type FavoriteGifRef,
-} from "../favorites.ts";
+} from "../plugin/favorites.ts";
 
 describe("prefetch newest-first and 1/3 capacity", () => {
     it("prefetchTargetCount is floor(max/3), at least 1", () => {

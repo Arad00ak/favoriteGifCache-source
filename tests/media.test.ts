@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
-import { createFavoriteGifCache, MemoryStorageBackend } from "../gifCache.ts";
-import { ensureCached, getCachedBytes } from "../media.ts";
+import { createFavoriteGifCache, MemoryStorageBackend } from "../plugin/gifCache.ts";
+import { ensureCached, getCachedBytes } from "../plugin/media.ts";
 
 describe("ensureCached", () => {
     it("miss downloads once, stores, hit skips network", async () => {

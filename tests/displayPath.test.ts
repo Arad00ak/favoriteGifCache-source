@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
-import { createFavoriteGifCache, MemoryStorageBackend } from "../gifCache.ts";
-import { ensureCached } from "../media.ts";
+import { createFavoriteGifCache, MemoryStorageBackend } from "../plugin/gifCache.ts";
+import { ensureCached } from "../plugin/media.ts";
 
 function bytes(s: string) {
     return new TextEncoder().encode(s);

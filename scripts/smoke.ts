@@ -2,7 +2,7 @@ import {
     createFavoriteGifCache,
     MemoryStorageBackend,
     DEFAULT_MAX_ENTRIES,
-} from "../gifCache.ts";
+} from "../plugin/gifCache.ts";
 
 function fail(msg: string): never {
     console.error("SMOKE FAIL:", msg);

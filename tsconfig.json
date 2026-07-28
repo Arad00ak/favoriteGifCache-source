@@ -8,7 +8,8 @@
     "noEmit": true,
     "esModuleInterop": true,
     "types": ["node"],
-    "lib": ["ES2022", "DOM"]
+    "lib": ["ES2022", "DOM"],
+    "jsx": "react-jsx"
   },
-  "include": ["*.ts", "tests/**/*.ts", "scripts/**/*.ts"]
+  "include": ["plugin/**/*.ts", "plugin/**/*.tsx", "tests/**/*.ts", "scripts/**/*.ts"]
 }

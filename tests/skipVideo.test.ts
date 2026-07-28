@@ -5,9 +5,9 @@ import {
     isCacheableFavoriteUrl,
     isHeavyVideoMime,
     isHeavyVideoUrl,
-} from "../favorites.ts";
-import { createFavoriteGifCache, MemoryStorageBackend } from "../gifCache.ts";
-import { ensureCached, MAX_ENTRY_BYTES } from "../media.ts";
+} from "../plugin/favorites.ts";
+import { createFavoriteGifCache, MemoryStorageBackend } from "../plugin/gifCache.ts";
+import { ensureCached, MAX_ENTRY_BYTES } from "../plugin/media.ts";
 
 describe("media size / video rules", () => {
     it("detects mp4 urls but still treats tenor hosts as cache candidates", () => {

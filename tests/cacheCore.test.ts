@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
-import { DEFAULT_MAX_BYTES, DEFAULT_MAX_ENTRIES, GifCacheCore } from "../cacheCore.ts";
+import { DEFAULT_MAX_BYTES, DEFAULT_MAX_ENTRIES, GifCacheCore } from "../plugin/cacheCore.ts";
 
 function bytes(label: string) {
     return new TextEncoder().encode(label);
