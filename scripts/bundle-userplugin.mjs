@@ -67,7 +67,6 @@ import { Menu, Toasts, useEffect, useState } from "@webpack/common";
 for (const file of order) {
     const full = path.join(pluginDir, file);
     const src = fs.readFileSync(full, "utf8");
-    parts.push(`// ----- ${file} -----\n`);
     parts.push(stripModule(src, file));
     parts.push("\n");
 }
