@@ -37,9 +37,9 @@ export const settings = definePluginSettings({
     },
     cacheDirectory: {
         type: OptionType.STRING,
-        description: "Folder for cache files (empty = IndexedDB). Use Choose folder above.",
+        description: "Cache folder path (or use Choose folder above)",
         default: "",
-        placeholder: "Leave empty for default IndexedDB",
+        placeholder: "Empty = default IndexedDB",
         onChange: () => settingsHooks.onCacheDirectoryChange(),
     },
     smartEviction: {

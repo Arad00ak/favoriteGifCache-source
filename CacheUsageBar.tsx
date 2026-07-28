@@ -1,11 +1,10 @@
 import { Button } from "@components/Button";
-import { useEffect, useState } from "@webpack/common";
-import { Toasts } from "@webpack/common";
+import { Toasts, useEffect, useState } from "@webpack/common";
 
 import { getActiveCache, rebuildActiveCache } from "./cacheAccess";
 import { DEFAULT_MAX_BYTES, DEFAULT_MAX_ENTRIES } from "./gifCache";
-import { getPluginNative, hasFileNative } from "./nativeApi";
-import { settings } from "./settings"; // settings.store only — no cycle through this component
+import { getPluginNative } from "./nativeApi";
+import { settings } from "./settings";
 
 function formatMB(bytes: number) {
     if (!Number.isFinite(bytes) || bytes < 0) return "0.0";
@@ -112,7 +111,7 @@ export function CacheUsageBar() {
                 const mb = cache.getMaxBytes();
                 setMaxBytes(Number.isFinite(mb) ? mb : DEFAULT_MAX_BYTES);
                 const dir = (settings.store.cacheDirectory || "").trim();
-                setPathLabel(dir || "IndexedDB (default Discord profile storage)");
+                setPathLabel(dir || "IndexedDB (default)");
                 setReady(true);
             } catch {
                 if (alive) setReady(false);
@@ -129,7 +128,7 @@ export function CacheUsageBar() {
     const usedMB = formatMB(bytes);
     const maxMB = formatMB(maxBytes);
     const leftMB = formatMB(Math.max(0, maxBytes - bytes));
-    const canPickFolder = hasFileNative();
+    const hasCustomPath = !!(settings.store.cacheDirectory || "").trim();
 
     const onClear = async () => {
         setBusy(true);
@@ -147,20 +146,24 @@ export function CacheUsageBar() {
 
     const onBrowse = async () => {
         const native = getPluginNative();
-        if (!native) {
-            toast("Folder pick needs the desktop client", Toasts.Type.FAILURE);
+        if (!native?.pickCacheDirectory) {
+            toast("Folder picker unavailable — restart Discord after updating", Toasts.Type.FAILURE);
             return;
         }
         setBusy(true);
         try {
-            const current = (settings.store.cacheDirectory || "").trim()
-                || await native.getDefaultCacheDir();
-            const picked = await native.pickCacheDirectory(current);
+            let startPath = (settings.store.cacheDirectory || "").trim();
+            if (!startPath && typeof native.getDefaultCacheDir === "function") {
+                startPath = await native.getDefaultCacheDir();
+            }
+            const picked = await native.pickCacheDirectory(startPath || undefined);
             if (!picked) {
                 setBusy(false);
                 return;
             }
-            await native.ensureCacheDir(picked);
+            if (typeof native.ensureCacheDir === "function") {
+                await native.ensureCacheDir(picked);
+            }
             settings.store.cacheDirectory = picked;
             await rebuildActiveCache();
             toast("Cache folder updated", Toasts.Type.SUCCESS);
@@ -177,7 +180,7 @@ export function CacheUsageBar() {
         try {
             settings.store.cacheDirectory = "";
             await rebuildActiveCache();
-            toast("Using default IndexedDB storage", Toasts.Type.SUCCESS);
+            toast("Using default storage", Toasts.Type.SUCCESS);
             setTick(t => t + 1);
         } catch {
             toast("Failed to reset storage", Toasts.Type.FAILURE);
@@ -244,32 +247,23 @@ export function CacheUsageBar() {
                 >
                     Clear cache
                 </Button>
-                {canPickFolder && (
-                    <>
-                        <Button
-                            size="small"
-                            variant="primary"
-                            disabled={busy}
-                            onClick={() => void onBrowse()}
-                        >
-                            Choose folder
-                        </Button>
-                        <Button
-                            size="small"
-                            variant="secondary"
-                            disabled={busy || !(settings.store.cacheDirectory || "").trim()}
-                            onClick={() => void onUseDefault()}
-                        >
-                            Use default
-                        </Button>
-                    </>
-                )}
+                <Button
+                    size="small"
+                    variant="primary"
+                    disabled={busy}
+                    onClick={() => void onBrowse()}
+                >
+                    Choose folder
+                </Button>
+                <Button
+                    size="small"
+                    variant="secondary"
+                    disabled={busy || !hasCustomPath}
+                    onClick={() => void onUseDefault()}
+                >
+                    Use default
+                </Button>
             </div>
-            {!canPickFolder && (
-                <div style={{ marginTop: 8, color: "var(--text-muted)", fontSize: 12 }}>
-                    Custom folders need the desktop Equicord/Vencord client (native helpers).
-                </div>
-            )}
         </div>
     );
 }
