@@ -56,11 +56,16 @@ export async function downloadFavoriteMedia(
         }
     }
 
+    // Renderer fallback: credentials "include" causes CORS storms and can tank Discord.
+    // Prefer omit; if native already exists and failed, skip fallback entirely.
+    const nativeAvailable = !!(native && typeof (native as any).fetchMedia === "function");
+    if (nativeAvailable) return null;
+
     try {
         const res = await fetchImpl(url, {
-            // omit cors mode — let Electron use default; strict cors often fails here
-            credentials: "include",
+            credentials: "omit",
             cache: "force-cache",
+            mode: "cors",
         } as RequestInit);
         if (!res.ok) return null;
         const mime = guessMime(url, res.headers.get("content-type"));

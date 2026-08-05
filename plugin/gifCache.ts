@@ -1,6 +1,7 @@
 import {
     DEFAULT_MAX_BYTES,
     GifCacheCore,
+    SOFT_MEMORY_BYTES,
     type CacheCoreOptions,
     type CacheEntry,
     type CacheMeta,
@@ -13,7 +14,7 @@ import {
     type StorageBackend,
 } from "./storage";
 
-export { DEFAULT_MAX_BYTES, GifCacheCore };
+export { DEFAULT_MAX_BYTES, SOFT_MEMORY_BYTES, GifCacheCore };
 export type { CacheEntry, CacheMeta, PutOptions, PutResult, StorageBackend };
 export { MemoryStorageBackend };
 
@@ -77,12 +78,32 @@ export class FavoriteGifCache {
                     : [...before].filter(k => !this.core.has(k));
                 if (gone.length) await this.backend.deleteMany(gone);
 
-                // rebuild blob: urls from disk so the picker can paint offline
-                this.warmAllBlobUrls();
+                // Drop cold payloads so a big disk cache cannot OOM Discord on boot.
+                // Do NOT warm every blob URL here — picker warms only what it shows.
+                for (const key of this.core.ensureSoftMemory()) this.revokeBlob(key);
+
                 this.initDone = true;
             })();
         }
         await this.ready;
+    }
+
+    /**
+     * Ensure payload bytes are in RAM (reload from disk if soft-unloaded).
+     * Returns false if missing entirely.
+     */
+    async hydrate(key: string): Promise<boolean> {
+        await this.init();
+        if (!this.core.has(key)) return false;
+        if (this.core.hasResidentData(key)) return true;
+
+        const fromDisk = await this.backend.get(key);
+        if (!fromDisk || fromDisk.data.byteLength === 0) return false;
+        this.core.loadEntry(fromDisk);
+        for (const k of this.core.ensureSoftMemory(key)) {
+            if (k !== key) this.revokeBlob(k);
+        }
+        return this.core.hasResidentData(key);
     }
 
     getMaxBytes() {
@@ -117,6 +138,10 @@ export class FavoriteGifCache {
         return this.core.has(key);
     }
 
+    hasResidentData(key: string) {
+        return this.core.hasResidentData(key);
+    }
+
     keys() {
         return this.core.keys();
     }
@@ -127,14 +152,17 @@ export class FavoriteGifCache {
 
     async get(key: string): Promise<CacheEntry | null> {
         await this.init();
+        if (this.core.needsHydrate(key)) await this.hydrate(key);
         const entry = this.core.get(key);
-        if (!entry) return null;
+        if (!entry || entry.data.byteLength === 0) return null;
+        // only rewrite disk when we have real payload (use stats)
         await this.backend.put(entry);
         return entry;
     }
 
     async peek(key: string) {
         await this.init();
+        if (this.core.needsHydrate(key)) await this.hydrate(key);
         return this.core.peek(key);
     }
 
@@ -174,10 +202,14 @@ export class FavoriteGifCache {
 
         if (result.stored) {
             const stored = this.core.peek(key);
-            if (stored) {
+            if (stored && stored.data.byteLength > 0) {
                 await this.backend.put(stored);
                 this.revokeBlob(key);
                 this.ensureBlobUrlSync(key, { bumpUsage: false });
+            }
+            // Soft unload may have dropped other payloads — drop their blob URLs too
+            for (const k of [...this.blobUrls.keys()]) {
+                if (!this.core.hasResidentData(k)) this.revokeBlob(k);
             }
         }
 
@@ -233,8 +265,11 @@ export class FavoriteGifCache {
             return existing;
         }
 
+        // Payload soft-unloaded — caller should hydrate async; do not mint empty blobs
+        if (this.core.needsHydrate(key)) return null;
+
         const entry = bump ? this.core.get(key) : this.core.peek(key);
-        if (!entry) return null;
+        if (!entry || entry.data.byteLength === 0) return null;
         if (bump) this.scheduleMetaPersist(entry);
 
         try {
@@ -246,6 +281,15 @@ export class FavoriteGifCache {
         } catch {
             return null;
         }
+    }
+
+    /** Hydrate from disk if needed, then create blob URL. */
+    async ensureBlobUrl(key: string, opts: BlobUrlOptions = {}): Promise<string | null> {
+        await this.init();
+        if (this.core.needsHydrate(key)) {
+            await this.hydrate(key);
+        }
+        return this.ensureBlobUrlSync(key, opts);
     }
 
     resolveDisplayUrlSync(remoteUrl: string): string | null {
@@ -284,18 +328,22 @@ export class FavoriteGifCache {
         return null;
     }
 
+    /**
+     * Create blob URLs for keys that already have resident data.
+     * Does not hydrate the entire cache (that would OOM). Pass only the visible set.
+     */
     warmAllBlobUrls(keys?: string[]) {
         const list = keys ?? this.core.keys();
         let n = 0;
         for (const key of list) {
+            if (!this.core.hasResidentData(key)) continue;
             if (this.ensureBlobUrlSync(key, { bumpUsage: false })) n += 1;
         }
         return n;
     }
 
     async getBlobUrl(key: string) {
-        await this.init();
-        return this.ensureBlobUrlSync(key, { bumpUsage: true });
+        return this.ensureBlobUrl(key, { bumpUsage: true });
     }
 
     getCachedBlobUrl(key: string) {
@@ -303,13 +351,16 @@ export class FavoriteGifCache {
     }
 
     private scheduleMetaPersist(entry: CacheEntry) {
+        // Never persist a soft-unloaded shell (empty data) over the real disk bytes
+        if (entry.data.byteLength === 0 && entry.size > 0) return;
+
         const prev = this.metaPersistQueue.get(entry.key);
         if (prev) clearTimeout(prev);
 
         const t = setTimeout(() => {
             this.metaPersistQueue.delete(entry.key);
             const latest = this.core.peek(entry.key);
-            if (!latest) return;
+            if (!latest || (latest.data.byteLength === 0 && latest.size > 0)) return;
             void this.backend.put(latest).catch(() => {});
         }, 50);
         this.metaPersistQueue.set(entry.key, t);
@@ -335,6 +386,7 @@ export class FavoriteGifCache {
 export function createFavoriteGifCache(options: FavoriteGifCacheOptions = {}) {
     return new FavoriteGifCache({
         maxBytes: options.maxBytes ?? DEFAULT_MAX_BYTES,
+        softMemoryBytes: options.softMemoryBytes ?? SOFT_MEMORY_BYTES,
         backend: options.backend,
         now: options.now,
         smartEviction: options.smartEviction,

@@ -1,5 +1,11 @@
-/** Soft size budget shown in settings and enforced on put / load. */
+/** Soft size budget shown in settings and enforced on put / load (disk + catalog). */
 export const DEFAULT_MAX_BYTES = 500 * 1024 * 1024;
+/**
+ * Hard cap on how much decoded media we keep in the renderer heap at once.
+ * Disk can still hold up to maxBytes; cold entries unload payload and reload on demand.
+ * Without this, a full 500 MB catalog OOMs Discord.
+ */
+export const SOFT_MEMORY_BYTES = 80 * 1024 * 1024;
 
 export interface CacheMeta {
     key: string;
@@ -16,6 +22,8 @@ export interface CacheEntry extends CacheMeta {
 
 export interface CacheCoreOptions {
     maxBytes?: number;
+    /** In-heap payload budget (default SOFT_MEMORY_BYTES). */
+    softMemoryBytes?: number;
     now?: () => number;
 }
 
@@ -38,6 +46,7 @@ export interface PutResult {
 export class GifCacheCore {
     private readonly entries = new Map<string, CacheEntry>();
     private maxBytes: number;
+    private softMemoryBytes: number;
     private totalBytes = 0;
     private readonly now: () => number;
     /** Keys we try not to evict (usually still in Discord favorites). */
@@ -45,6 +54,7 @@ export class GifCacheCore {
 
     constructor(options: CacheCoreOptions = {}) {
         this.maxBytes = options.maxBytes ?? Number.POSITIVE_INFINITY;
+        this.softMemoryBytes = options.softMemoryBytes ?? SOFT_MEMORY_BYTES;
         this.now = options.now ?? (() => Date.now());
     }
 
@@ -55,6 +65,10 @@ export class GifCacheCore {
     setMaxBytes(n: number) {
         this.maxBytes = n > 0 ? n : Number.POSITIVE_INFINITY;
         return this.enforceCap();
+    }
+
+    getSoftMemoryBytes() {
+        return this.softMemoryBytes;
     }
 
     setProtectedKeys(keys: Iterable<string>) {
@@ -73,12 +87,30 @@ export class GifCacheCore {
         return this.totalBytes;
     }
 
+    /** Bytes of payload currently resident in the renderer heap. */
+    residentBytes() {
+        let n = 0;
+        for (const e of this.entries.values()) n += e.data.byteLength;
+        return n;
+    }
+
     keys() {
         return [...this.entries.keys()];
     }
 
     has(key: string) {
         return this.entries.has(key);
+    }
+
+    /** True when the key is cataloged but payload was unloaded to free RAM. */
+    needsHydrate(key: string) {
+        const entry = this.entries.get(key);
+        return !!entry && entry.size > 0 && entry.data.byteLength === 0;
+    }
+
+    hasResidentData(key: string) {
+        const entry = this.entries.get(key);
+        return !!entry && entry.data.byteLength > 0;
     }
 
     get(key: string): CacheEntry | null {
@@ -173,6 +205,7 @@ export class GifCacheCore {
 
         this.entries.set(key, entry);
         this.totalBytes += size;
+        this.ensureSoftMemory(key);
         return { stored: true, evictedKeys };
     }
 
@@ -199,10 +232,14 @@ export class GifCacheCore {
             this.totalBytes -= prev.size;
             this.entries.delete(entry.key);
         }
+        // Prefer stored size when present so unloaded shells (data empty) still account disk usage
+        const size = payload.byteLength > 0
+            ? payload.byteLength
+            : (typeof entry.size === "number" && entry.size > 0 ? entry.size : payload.byteLength);
         const next: CacheEntry = {
             key: entry.key,
             data: payload,
-            size: payload.byteLength,
+            size,
             mimeType: entry.mimeType || "application/octet-stream",
             useCount: entry.useCount ?? 0,
             lastUsed: entry.lastUsed ?? this.now(),
@@ -210,6 +247,44 @@ export class GifCacheCore {
         };
         this.entries.set(next.key, next);
         this.totalBytes += next.size;
+    }
+
+    /**
+     * Drop cold payloads from the heap until under softMemoryBytes.
+     * Catalog (size/meta) stays; disk copy is untouched. Returns unloaded keys.
+     */
+    ensureSoftMemory(keepKey?: string): string[] {
+        const unloaded: string[] = [];
+        while (this.residentBytes() > this.softMemoryBytes) {
+            const victim = this.pickDataVictim(keepKey);
+            if (!victim) break;
+            if (victim.data.byteLength === 0) break;
+            victim.data = new Uint8Array(0);
+            unloaded.push(victim.key);
+        }
+        return unloaded;
+    }
+
+    /** Prefer cold, unprotected, resident payloads for RAM unload (not full eviction). */
+    private pickDataVictim(exceptKey?: string): CacheEntry | null {
+        let bestUnprotected: CacheEntry | null = null;
+        let bestAny: CacheEntry | null = null;
+
+        for (const entry of this.entries.values()) {
+            if (exceptKey && entry.key === exceptKey) continue;
+            if (entry.data.byteLength === 0) continue;
+
+            if (!this.protectedKeys.has(entry.key)) {
+                if (!bestUnprotected || this.isWorse(entry, bestUnprotected)) {
+                    bestUnprotected = entry;
+                }
+            }
+            if (!bestAny || this.isWorse(entry, bestAny)) {
+                bestAny = entry;
+            }
+        }
+
+        return bestUnprotected ?? bestAny;
     }
 
     /**

@@ -8,12 +8,13 @@ import {
 } from "../plugin/favorites.ts";
 
 describe("prefetch newest-first and 1/3 capacity", () => {
-    it("prefetchTargetBytes is floor(maxBytes/3), at least 1", () => {
-        assert.equal(prefetchTargetBytes(500 * 1024 * 1024), Math.floor((500 * 1024 * 1024) / 3));
+    it("prefetchTargetBytes is min(floor(max/3), 32MB), at least 1", () => {
+        assert.equal(prefetchTargetBytes(500 * 1024 * 1024), 32 * 1024 * 1024);
         assert.equal(prefetchTargetBytes(3), 1);
         assert.equal(prefetchTargetBytes(1), 1);
         assert.equal(prefetchTargetBytes(100), 33);
         assert.equal(prefetchTargetBytes(0), 0);
+        assert.equal(prefetchTargetBytes(60 * 1024 * 1024), 20 * 1024 * 1024);
     });
 
     it("sortFavoritesNewestFirst puts higher order first", () => {

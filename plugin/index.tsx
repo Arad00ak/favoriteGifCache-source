@@ -22,6 +22,7 @@ import {
     isHeavyVideoUrl,
     isLikelyGifMediaUrl,
     keysForFavorite,
+    PREFETCH_MAX_FILES,
     prefetchTargetBytes,
     sortFavoritesNewestFirst,
     type FavoriteGifRef,
@@ -95,7 +96,7 @@ async function applyLimitsFromSettings() {
         await c.init();
         await c.setMaxBytes(maxBytesFromSettings());
         c.setSmartEviction(settings.store.smartEviction !== false);
-        c.warmAllBlobUrls();
+        // do not warm entire cache into RAM after settings change
     } catch {
         // settings UI should still work
     }
@@ -150,7 +151,9 @@ function refreshFavoriteSet(refs?: FavoriteGifRef[]): string[] {
 
 function isTrackedFavorite(url: string) {
     if (!url || !isLikelyGifMediaUrl(url)) return false;
-    if (favoriteUrlSet.size === 0) return isLikelyGifMediaUrl(url);
+    // Until favorites seed, do NOT treat every gif URL as favorite — that made
+    // the fetch interceptor + cache init run on every media request (crash fuel).
+    if (!favoritesSeeded || favoriteUrlSet.size === 0) return false;
     return favoriteUrlSet.has(url) || favoriteUrlSet.has(cacheKeyForUrl(url));
 }
 
@@ -272,8 +275,8 @@ async function manualRemoveFromCache(url: string) {
 
 /**
  * Startup auto-download:
- * newest favorite first, walk older, stop once cache bytes hit 1/3 of max size.
- * Never evicts during prefetch.
+ * newest favorite first, stop at prefetch byte/file caps (not full disk budget).
+ * Never evicts during prefetch. Never warms the whole cache into blob URLs.
  */
 async function prefetchFavorites() {
     try {
@@ -288,11 +291,11 @@ async function prefetchFavorites() {
         }
 
         const targetBytes = prefetchTargetBytes(c.getMaxBytes());
-        // already at / over 1/3 capacity — only warm blobs for newest slice
         const newest = sortFavoritesNewestFirst(refs);
         const queue: string[] = [];
         const seen = new Set<string>();
         for (const ref of newest) {
+            if (queue.length >= PREFETCH_MAX_FILES) break;
             const u = pickCacheableUrl(ref);
             if (!u) continue;
             const key = cacheKeyForUrl(u);
@@ -302,30 +305,29 @@ async function prefetchFavorites() {
         }
         if (!queue.length) return;
 
-        if (c.bytes() >= targetBytes) {
-            for (const url of queue) {
-                c.ensureBlobUrlSync(cacheKeyForUrl(url), { bumpUsage: false });
-            }
-            return;
-        }
+        // Measure progress by how much we add this session, not total disk size
+        // (disk may already be large from prior use — still fine, just don't fill RAM)
+        let sessionBytes = 0;
+        let filesDone = 0;
 
-        // Sequential newest→older so we fill 1/3 with the latest gifs, not random workers
         for (const url of queue) {
-            if (c.bytes() >= targetBytes) break;
+            if (sessionBytes >= targetBytes || filesDone >= PREFETCH_MAX_FILES) break;
             try {
                 const key = cacheKeyForUrl(url);
                 if (c.has(key) || c.has(url)) {
-                    c.ensureBlobUrlSync(key, { bumpUsage: false });
+                    await c.ensureBlobUrl(key, { bumpUsage: false });
+                    filesDone += 1;
                     continue;
                 }
+                const before = c.bytes();
                 await ensureCached(c, url, { allowEvict: false, ...autoCacheOpts() });
-                c.ensureBlobUrlSync(key, { bumpUsage: false });
-                if (key !== url) c.ensureBlobUrlSync(url, { bumpUsage: false });
+                sessionBytes += Math.max(0, c.bytes() - before);
+                await c.ensureBlobUrl(key, { bumpUsage: false });
+                filesDone += 1;
             } catch {
                 // skip bad urls
             }
         }
-        c.warmAllBlobUrls();
     } catch {
         // never take discord down
     }
@@ -465,35 +467,54 @@ export default definePlugin({
             void (async () => {
                 try {
                     await c.init();
-                    c.warmAllBlobUrls();
+                    // Only warm keys for THIS visible list — never the whole disk cache
+                    const visibleKeys: string[] = [];
+                    for (const ref of refs) {
+                        const u = pickCacheableUrl(ref);
+                        if (!u) continue;
+                        visibleKeys.push(cacheKeyForUrl(u));
+                    }
+                    // hydrate a few visible entries that are on disk but not in RAM
+                    let hydrateBudget = 12;
+                    for (const key of visibleKeys) {
+                        if (hydrateBudget <= 0) break;
+                        if (c.has(key) && !c.hasResidentData(key)) {
+                            await c.hydrate(key);
+                            hydrateBudget -= 1;
+                        }
+                    }
+                    c.warmAllBlobUrls(visibleKeys);
                     let changed = applySyncBlobSrc(favorites, c) > 0;
 
-                    // Brand-new favorites may steal a slot from least-used when full
-                    // (still skip mp4/video — those stay on the network)
+                    // Brand-new favorites may steal space from least-used when full
                     for (const u of newlyFavorited) {
                         const cacheUrl = pickCacheableUrl({ src: u, url: u });
                         if (!cacheUrl || isAutoCacheDenied(cacheUrl)) continue;
                         try {
                             await cacheOnUserAction(c, cacheUrl, fetch, autoCacheOpts());
                             const key = cacheKeyForUrl(cacheUrl);
-                            c.ensureBlobUrlSync(key, { bumpUsage: false });
+                            await c.ensureBlobUrl(key, { bumpUsage: false });
                         } catch {
                             // ignore single failures
                         }
                     }
+
+                    // Scroll fill: tiny budget so opening the picker cannot download 500MB
+                    let scrollDownloads = 0;
+                    const SCROLL_DOWNLOAD_BUDGET = 3;
 
                     for (const ref of refs) {
                         const u = pickCacheableUrl(ref);
                         if (!u || isAutoCacheDenied(u)) continue;
                         const key = cacheKeyForUrl(u);
 
-                        // Scrolling: fill free space only, never thrash-evict
-                        if (!c.has(key) && !c.has(u)) {
+                        if (!c.has(key) && !c.has(u) && scrollDownloads < SCROLL_DOWNLOAD_BUDGET) {
                             await ensureCached(c, u, { allowEvict: false, ...autoCacheOpts() });
+                            scrollDownloads += 1;
                         }
 
-                        const blob = c.ensureBlobUrlSync(key, { bumpUsage: false })
-                            || c.ensureBlobUrlSync(u, { bumpUsage: false });
+                        const blob = await c.ensureBlobUrl(key, { bumpUsage: false })
+                            || await c.ensureBlobUrl(u, { bumpUsage: false });
                         if (!blob) continue;
 
                         for (const gif of favorites) {

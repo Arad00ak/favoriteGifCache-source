@@ -9,7 +9,7 @@ function bytes(s: string) {
 }
 
 describe("display path", () => {
-    it("init rebuilds blob urls after a simulated restart", async () => {
+    it("init keeps disk data; blob urls hydrate on demand after restart", async () => {
         const backend = new MemoryStorageBackend();
         const first = createFavoriteGifCache({ backend });
         await first.put("https://media.tenor.com/cold.gif", bytes("COLD-BYTES"), "image/gif");
@@ -18,7 +18,9 @@ describe("display path", () => {
         assert.equal(second.getCachedBlobUrl("https://media.tenor.com/cold.gif"), undefined);
 
         await second.init();
-        const hot = second.getCachedBlobUrl("https://media.tenor.com/cold.gif");
+        // no full warm on init (OOM guard) — hydrate when display needs it
+        assert.equal(second.getCachedBlobUrl("https://media.tenor.com/cold.gif"), undefined);
+        const hot = await second.ensureBlobUrl("https://media.tenor.com/cold.gif", { bumpUsage: false });
         assert.ok(hot?.startsWith("blob:"));
         assert.equal(second.resolveDisplayUrlSync("https://media.tenor.com/cold.gif"), hot);
     });
