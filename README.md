@@ -13,7 +13,9 @@ cd src/userplugins
 git clone https://github.com/Arad00ak/FavoriteGifCache-userplugin FavoriteGifCache
 ```
 
-Then rebuild, restart Discord, and turn the plugin on.
+Then rebuild Equicord, inject/restart Discord, and enable **FavoriteGifCache**.
+
+Right-click menu (**Cache GIF** / **Remove from cache**) needs Equicord’s **ExtraContextMenusAPI** (built-in required API — leave it on).
 
 More detail: https://discord.com/channels/1015060230222131221/1257038407503446176
 

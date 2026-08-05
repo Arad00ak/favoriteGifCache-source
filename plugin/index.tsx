@@ -222,12 +222,23 @@ function toast(message: string, type: any) {
 
 function resolveItemUrl(item: any): string | null {
     if (!item) return null;
-    return pickCacheableUrl({
-        src: item.__fgcOriginalSrc || item.src,
-        url: item.__fgcOriginalUrl || item.url,
-        format: item.format,
-    }) || (typeof item.src === "string" && !item.src.startsWith("blob:") ? item.src : null)
-        || (typeof item.url === "string" && !item.url.startsWith("blob:") ? item.url : null);
+    // Prefer originals we stashed when rewriting to blob: — context menu must not use blob URLs
+    const src = typeof item.__fgcOriginalSrc === "string" && item.__fgcOriginalSrc
+        ? item.__fgcOriginalSrc
+        : (typeof item.src === "string" && !item.src.startsWith("blob:") && !item.src.startsWith("data:")
+            ? item.src
+            : undefined);
+    const url = typeof item.__fgcOriginalUrl === "string" && item.__fgcOriginalUrl
+        ? item.__fgcOriginalUrl
+        : (typeof item.url === "string" && !item.url.startsWith("blob:") && !item.url.startsWith("data:")
+            ? item.url
+            : undefined);
+
+    const picked = pickCacheableUrl({ src, url, format: item.format });
+    if (picked) return picked;
+    if (src) return src;
+    if (url) return url;
+    return null;
 }
 
 function isLocallyCached(url: string) {
@@ -378,13 +389,16 @@ export default definePlugin({
     ],
 
     /**
-     * Right-click on GIF in picker (needs ExtraContextMenusAPI).
+     * Right-click on GIF in picker (ExtraContextMenusAPI wires this in).
+     * Signature matches GifPickerContextMenuItemFactory: (instance, event).
      */
-    gifPickerContextMenu(instance: any) {
+    gifPickerContextMenu(instance: any, _e?: any) {
         try {
-            const item = instance?.props?.item;
+            const item = instance?.props?.item ?? instance?.props;
             const url = resolveItemUrl(item);
-            if (!url || !isLikelyGifMediaUrl(url)) return null;
+            if (!url) return null;
+            // allow any remote media URL from the picker, not only known hosts
+            if (url.startsWith("blob:") || url.startsWith("data:")) return null;
 
             const cached = isLocallyCached(url);
 
@@ -405,7 +419,8 @@ export default definePlugin({
                     />
                 </Menu.MenuGroup>
             );
-        } catch {
+        } catch (e) {
+            console.error("[FavoriteGifCache] gifPickerContextMenu failed", e);
             return null;
         }
     },
