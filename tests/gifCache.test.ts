@@ -10,10 +10,10 @@ function bytes(s: string) {
 describe("FavoriteGifCache", () => {
     it("survives a new instance on the same backend (like restarting Discord)", async () => {
         const backend = new MemoryStorageBackend();
-        const a = createFavoriteGifCache({ maxEntries: 500, backend });
+        const a = createFavoriteGifCache({ backend });
         await a.put("https://example.com/f.gif", bytes("durable-gif"), "image/gif");
 
-        const b = createFavoriteGifCache({ maxEntries: 500, backend });
+        const b = createFavoriteGifCache({ backend });
         await b.init();
         const again = await b.peek("https://example.com/f.gif");
         assert.ok(again);
@@ -24,7 +24,7 @@ describe("FavoriteGifCache", () => {
         const backend = new MemoryStorageBackend();
         let t = 0;
         const cache = createFavoriteGifCache({
-            maxEntries: 2,
+            maxBytes: 2,
             backend,
             now: () => ++t,
         });
@@ -42,7 +42,7 @@ describe("FavoriteGifCache", () => {
         const backend = new MemoryStorageBackend();
         let t = 0;
         const cache = createFavoriteGifCache({
-            maxEntries: 2,
+            maxBytes: 2,
             backend,
             now: () => ++t,
         });

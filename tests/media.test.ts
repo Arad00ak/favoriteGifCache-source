@@ -7,7 +7,6 @@ import { ensureCached, getCachedBytes } from "../plugin/media.ts";
 describe("ensureCached", () => {
     it("miss downloads once, stores, hit skips network", async () => {
         const cache = createFavoriteGifCache({
-            maxEntries: 10,
             backend: new MemoryStorageBackend(),
         });
         await cache.init();
@@ -38,7 +37,7 @@ describe("ensureCached", () => {
 
     it("when full, download without kicking existing entries", async () => {
         const cache = createFavoriteGifCache({
-            maxEntries: 1,
+            maxBytes: 4,
             backend: new MemoryStorageBackend(),
         });
         await cache.put("https://media.tenor.com/keep.gif", new TextEncoder().encode("KEEP"));

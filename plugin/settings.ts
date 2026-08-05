@@ -1,8 +1,6 @@
 import { definePluginSettings } from "@api/Settings";
 import { OptionType } from "@utils/types";
 
-import { DEFAULT_MAX_ENTRIES } from "./gifCache";
-
 // component plugged in from index to avoid circular imports
 let usageComponent: (() => any) | null = null;
 
@@ -22,12 +20,6 @@ export const settings = definePluginSettings({
         type: OptionType.COMPONENT,
         description: "Storage",
         component: () => (usageComponent ? usageComponent() : null),
-    },
-    maxEntries: {
-        type: OptionType.NUMBER,
-        description: "Max number of GIFs to save",
-        default: DEFAULT_MAX_ENTRIES,
-        onChange: () => settingsHooks.onLimitsChange(),
     },
     maxMegabytes: {
         type: OptionType.NUMBER,

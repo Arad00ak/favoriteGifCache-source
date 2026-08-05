@@ -1,5 +1,4 @@
-export const DEFAULT_MAX_ENTRIES = 500;
-/** Soft size budget shown in settings and enforced with the entry cap. */
+/** Soft size budget shown in settings and enforced on put / load. */
 export const DEFAULT_MAX_BYTES = 500 * 1024 * 1024;
 
 export interface CacheMeta {
@@ -16,7 +15,6 @@ export interface CacheEntry extends CacheMeta {
 }
 
 export interface CacheCoreOptions {
-    maxEntries?: number;
     maxBytes?: number;
     now?: () => number;
 }
@@ -39,7 +37,6 @@ export interface PutResult {
 
 export class GifCacheCore {
     private readonly entries = new Map<string, CacheEntry>();
-    private maxEntries: number;
     private maxBytes: number;
     private totalBytes = 0;
     private readonly now: () => number;
@@ -47,18 +44,8 @@ export class GifCacheCore {
     private protectedKeys = new Set<string>();
 
     constructor(options: CacheCoreOptions = {}) {
-        this.maxEntries = Math.max(1, options.maxEntries ?? DEFAULT_MAX_ENTRIES);
         this.maxBytes = options.maxBytes ?? Number.POSITIVE_INFINITY;
         this.now = options.now ?? (() => Date.now());
-    }
-
-    getMaxEntries() {
-        return this.maxEntries;
-    }
-
-    setMaxEntries(n: number) {
-        this.maxEntries = Math.max(1, n);
-        return this.enforceCap();
     }
 
     getMaxBytes() {
@@ -149,14 +136,7 @@ export class GifCacheCore {
             return { stored: false, evictedKeys };
         }
 
-        const needsSlot = !existing;
-        const overCount = () => this.entries.size >= this.maxEntries && needsSlot
-            || (existing ? this.entries.size > this.maxEntries : this.entries.size >= this.maxEntries);
-        // after deleting existing, size is entries without this key
-        while (
-            (needsSlot && this.entries.size >= this.maxEntries)
-            || this.totalBytes + size > this.maxBytes
-        ) {
+        while (this.totalBytes + size > this.maxBytes) {
             if (!allowEvict) {
                 // put existing back if we stripped it for rewrite and can't finish
                 if (existing) {
@@ -172,10 +152,7 @@ export class GifCacheCore {
             evictedKeys.push(victim.key);
         }
 
-        if (
-            (needsSlot && this.entries.size >= this.maxEntries)
-            || this.totalBytes + size > this.maxBytes
-        ) {
+        if (this.totalBytes + size > this.maxBytes) {
             if (existing) {
                 this.entries.set(existing.key, existing);
                 this.totalBytes += existing.size;
@@ -268,7 +245,7 @@ export class GifCacheCore {
 
     private enforceCap(): string[] {
         const evicted: string[] = [];
-        while (this.entries.size > this.maxEntries || this.totalBytes > this.maxBytes) {
+        while (this.totalBytes > this.maxBytes) {
             const victim = this.pickVictim();
             if (!victim) break;
             this.entries.delete(victim.key);

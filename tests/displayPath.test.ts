@@ -11,10 +11,10 @@ function bytes(s: string) {
 describe("display path", () => {
     it("init rebuilds blob urls after a simulated restart", async () => {
         const backend = new MemoryStorageBackend();
-        const first = createFavoriteGifCache({ maxEntries: 50, backend });
+        const first = createFavoriteGifCache({ backend });
         await first.put("https://media.tenor.com/cold.gif", bytes("COLD-BYTES"), "image/gif");
 
-        const second = createFavoriteGifCache({ maxEntries: 50, backend });
+        const second = createFavoriteGifCache({ backend });
         assert.equal(second.getCachedBlobUrl("https://media.tenor.com/cold.gif"), undefined);
 
         await second.init();
@@ -26,7 +26,7 @@ describe("display path", () => {
     it("display resolve bumps useCount so eviction prefers idle entries", async () => {
         let t = 0;
         const cache = createFavoriteGifCache({
-            maxEntries: 2,
+            maxBytes: 2,
             backend: new MemoryStorageBackend(),
             now: () => ++t,
         });
@@ -58,12 +58,14 @@ describe("display path", () => {
 
     it("prefetch fill stops at capacity without deleting old entries", async () => {
         const backend = new MemoryStorageBackend();
-        const cache = createFavoriteGifCache({ maxEntries: 1, backend });
+        // room for one 4-byte body only
+        const cache = createFavoriteGifCache({ maxBytes: 4, backend });
         await cache.init();
 
         const fakeFetch: typeof fetch = async (input) => {
             const url = String(input);
-            return new Response(bytes("x-" + url), {
+            const body = url.includes("first") ? "AAAA" : "BBBB";
+            return new Response(bytes(body), {
                 status: 200,
                 headers: { "Content-Type": "image/gif" },
             });

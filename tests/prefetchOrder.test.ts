@@ -2,17 +2,18 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
 import {
-    prefetchTargetCount,
+    prefetchTargetBytes,
     sortFavoritesNewestFirst,
     type FavoriteGifRef,
 } from "../plugin/favorites.ts";
 
 describe("prefetch newest-first and 1/3 capacity", () => {
-    it("prefetchTargetCount is floor(max/3), at least 1", () => {
-        assert.equal(prefetchTargetCount(500), 166);
-        assert.equal(prefetchTargetCount(3), 1);
-        assert.equal(prefetchTargetCount(1), 1);
-        assert.equal(prefetchTargetCount(100), 33);
+    it("prefetchTargetBytes is floor(maxBytes/3), at least 1", () => {
+        assert.equal(prefetchTargetBytes(500 * 1024 * 1024), Math.floor((500 * 1024 * 1024) / 3));
+        assert.equal(prefetchTargetBytes(3), 1);
+        assert.equal(prefetchTargetBytes(1), 1);
+        assert.equal(prefetchTargetBytes(100), 33);
+        assert.equal(prefetchTargetBytes(0), 0);
     });
 
     it("sortFavoritesNewestFirst puts higher order first", () => {
