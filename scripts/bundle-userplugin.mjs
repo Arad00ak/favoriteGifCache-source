@@ -10,6 +10,7 @@ const destDir = path.resolve(root, "..", "FavoriteGifCache-userplugin");
 const order = [
     "cacheCore.ts",
     "storage.ts",
+    "hosts.ts",
     "gifCache.ts",
     "favorites.ts",
     "denylist.ts",
