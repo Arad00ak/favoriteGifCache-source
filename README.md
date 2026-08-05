@@ -1,38 +1,75 @@
-# FavoriteGifCache (source)
+# FavoriteGifCache
 
-Source monorepo for the FavoriteGifCache userplugin.
+Equicord / Vencord userplugin. Keeps your Discord GIF picker favorites on your machine so they don't have to re-download every time you open the picker.
 
-## User install (separate single-file repo)
+## Install (users)
 
-Users do **not** clone this repo into `userplugins`.
+Don't clone this repo into `userplugins`. Use the install package:
 
-Install package (root `index.tsx`, like other userplugins):
-
-**https://github.com/Arad00ak/FavoriteGifCache-userplugin**
+https://github.com/Arad00ak/FavoriteGifCache-userplugin
 
 ```bash
 cd src/userplugins
 git clone https://github.com/Arad00ak/FavoriteGifCache-userplugin FavoriteGifCache
 ```
 
-Guide: https://discord.com/channels/1015060230222131221/1257038407503446176
+Then rebuild, restart Discord, and turn the plugin on.
 
-## Layout
+More detail: https://discord.com/channels/1015060230222131221/1257038407503446176
 
+## How it works
+
+Discord only stores a list of favorite GIF URLs. The actual files still come from Tenor/Discord CDN every time.
+
+This plugin:
+
+1. Downloads those files once
+2. Saves them locally (IndexedDB by default, or a folder you pick on desktop)
+3. Next time the picker opens, swaps the remote `src` for a local `blob:` URL when we already have the file
+
+So the first view can still hit the network. After that, hits should be local and faster.
+
+### On startup (if prefetch is on)
+
+It walks your favorites from newest to older and downloads until the cache hits about **1/3** of max capacity (e.g. max 500 → stop around 166). It does not fill the whole cache on boot on purpose.
+
+### When you're using the picker
+
+- **Scroll:** only fills free slots. If the cache is full, it does not kick old stuff just because you scrolled.
+- **New favorite / send:** can store the GIF. If the cache is full and smart eviction is on, it drops the least-used one first.
+- **Right-click:** Cache GIF or Remove from cache. Remove also blocks auto-cache for that URL until you Cache it again.
+
+### Desktop bits
+
+`native.ts` runs in Electron (not the Discord page). That's used for:
+
+- choosing a cache folder
+- downloading media without renderer CORS issues
+
+Without native helpers, it still falls back to IndexedDB + normal fetch.
+
+
+## This repo vs install repo
+
+| Repo | Purpose |
+|------|---------|
+| **This one** | Source, tests, bundler |
+| **FavoriteGifCache-userplugin** | What people clone into `userplugins` (`index.tsx` at root) |
+
+Edit files under `plugin/`, then:
+
+```bash
+npm run bundle:userplugin
 ```
-plugin/     # modular sources (edit here)
-tests/
-scripts/
-  bundle-userplugin.mjs   # packs plugin/ → ../FavoriteGifCache-userplugin/index.tsx
-```
 
-## Develop
+That rebuilds the single-file package in `../FavoriteGifCache-userplugin`.
+
+## Dev
 
 ```bash
 npm install
 npm test
 npm run smoke
-npm run bundle:userplugin   # refresh the install package
 ```
 
 ## License
