@@ -1,4 +1,4 @@
-import { definePluginSettings } from "@api/Settings";
+import { definePluginSettings, Settings } from "@api/Settings";
 import { OptionType } from "@utils/types";
 
 // component plugged in from index to avoid circular imports
@@ -14,6 +14,27 @@ export const settingsHooks = {
     onSmartEvictionChange: () => {},
     onCacheDirectoryChange: () => {},
 };
+
+/** Removed options still lingering in saved settings.json from older builds. */
+const STALE_SETTING_KEYS = ["maxEntries", "showCacheBadges"] as const;
+
+/**
+ * Drop dead keys from Equicord/Vencord settings so they do not stick around forever.
+ * Safe to call multiple times.
+ */
+export function purgeStalePluginSettings() {
+    try {
+        const plug = Settings.plugins?.FavoriteGifCache as Record<string, unknown> | undefined;
+        if (!plug || typeof plug !== "object") return;
+        for (const key of STALE_SETTING_KEYS) {
+            if (Object.prototype.hasOwnProperty.call(plug, key)) {
+                delete plug[key];
+            }
+        }
+    } catch {
+        // settings not ready yet
+    }
+}
 
 export const settings = definePluginSettings({
     cacheUsage: {
@@ -57,3 +78,6 @@ export const settings = definePluginSettings({
         default: true,
     },
 });
+
+// run as soon as the module loads (before start) so dead keys leave settings immediately
+purgeStalePluginSettings();
