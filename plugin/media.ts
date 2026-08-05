@@ -81,11 +81,7 @@ export async function getCachedBytes(cache: FavoriteGifCache, url: string) {
     if (!entry && key !== url) entry = cache.peekSync(url);
 
     if (entry) {
-        // record usage on real hit
         cache.touchSync(entry.key);
-        if (isHeavyVideoMime(entry.mimeType) && entry.size > MAX_ENTRY_BYTES) {
-            return null;
-        }
         return { data: entry.data.slice(), mimeType: entry.mimeType, key: entry.key };
     }
 
@@ -172,13 +168,18 @@ export async function cacheOnUserAction(
     cache: FavoriteGifCache,
     url: string,
     fetchImpl: typeof fetch = fetch,
-    opts: { force?: boolean; isDenied?: (url: string) => boolean; } = {},
+    opts: {
+        force?: boolean;
+        isDenied?: (url: string) => boolean;
+        maxBytes?: number;
+    } = {},
 ) {
     return ensureCached(cache, url, {
         fetchImpl,
         allowEvict: true,
         force: opts.force === true,
         isDenied: opts.isDenied,
+        maxBytes: opts.maxBytes,
     });
 }
 

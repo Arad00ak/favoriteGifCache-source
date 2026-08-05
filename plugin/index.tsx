@@ -32,7 +32,7 @@ import {
     DEFAULT_MAX_ENTRIES,
     type FavoriteGifCache,
 } from "./gifCache";
-import { cacheOnUserAction, ensureCached, installFetchInterceptor } from "./media";
+import { cacheOnUserAction, ensureCached, installFetchInterceptor, MAX_ENTRY_BYTES } from "./media";
 import { getPluginNative } from "./nativeApi";
 import { setUsageBarComponent, settings, settingsHooks } from "./settings";
 import { createBackendForPath } from "./storage";
@@ -53,6 +53,11 @@ function maxBytesFromSettings() {
     const mb = Number(settings.store.maxMegabytes);
     if (!Number.isFinite(mb) || mb <= 0) return DEFAULT_MAX_BYTES;
     return Math.floor(mb * 1024 * 1024);
+}
+
+/** Per-file download cap; Infinity when skipLargeFiles is off. */
+function perFileMaxBytes() {
+    return settings.store.skipLargeFiles === false ? Number.MAX_SAFE_INTEGER : MAX_ENTRY_BYTES;
 }
 
 function createBackend() {
@@ -236,13 +241,19 @@ function isLocallyCached(url: string) {
     }
 }
 
-const autoCacheOpts = () => ({ isDenied: isAutoCacheDenied });
+const autoCacheOpts = () => ({
+    isDenied: isAutoCacheDenied,
+    maxBytes: perFileMaxBytes(),
+});
 
 async function manualCacheGif(url: string) {
     await allowAutoCache(url);
     const c = getCache();
     await c.init();
-    const res = await cacheOnUserAction(c, url, fetch, { force: true });
+    const res = await cacheOnUserAction(c, url, fetch, {
+        force: true,
+        maxBytes: perFileMaxBytes(),
+    });
     if (res?.stored || c.has(cacheKeyForUrl(url))) {
         c.ensureBlobUrlSync(cacheKeyForUrl(url), { bumpUsage: true });
         toast("GIF cached", Toasts.Type.SUCCESS);
