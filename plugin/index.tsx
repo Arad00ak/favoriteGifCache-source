@@ -357,9 +357,10 @@ async function prefetchFavorites() {
 
 export default definePlugin({
     name: "FavoriteGifCache",
-    description: "Cache GIF picker favorites on disk so they load faster",
+    description: "Caches GIF picker favorites on disk so they load from local storage instead of re-downloading",
     authors: [{ name: "Arad", id: 825757055981846560n }],
     tags: ["GIF", "Media", "Performance"],
+    // ExtraContextMenusAPI (required Equicord API) wires gifPickerContextMenu
 
     settings,
 
