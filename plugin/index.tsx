@@ -22,7 +22,7 @@ import {
     isHeavyVideoUrl,
     isLikelyGifMediaUrl,
     keysForFavorite,
-    PREFETCH_MAX_FILES,
+    PREFETCH_WARM_NEWEST,
     prefetchTargetBytes,
     sortFavoritesNewestFirst,
     type FavoriteGifRef,
@@ -275,8 +275,8 @@ async function manualRemoveFromCache(url: string) {
 
 /**
  * Startup auto-download:
- * newest favorite first, stop at prefetch byte/file caps (not full disk budget).
- * Never evicts during prefetch. Never warms the whole cache into blob URLs.
+ * newest first until cache catalog hits 1/3 of max size (e.g. 500 MB → ~167 MB on disk).
+ * Never evicts. Does not keep ~167 MB of blob URLs in RAM — soft memory + warm only newest slice.
  */
 async function prefetchFavorites() {
     try {
@@ -295,7 +295,6 @@ async function prefetchFavorites() {
         const queue: string[] = [];
         const seen = new Set<string>();
         for (const ref of newest) {
-            if (queue.length >= PREFETCH_MAX_FILES) break;
             const u = pickCacheableUrl(ref);
             if (!u) continue;
             const key = cacheKeyForUrl(u);
@@ -305,29 +304,41 @@ async function prefetchFavorites() {
         }
         if (!queue.length) return;
 
-        // Measure progress by how much we add this session, not total disk size
-        // (disk may already be large from prior use — still fine, just don't fill RAM)
-        let sessionBytes = 0;
-        let filesDone = 0;
+        const warmNewest = async () => {
+            for (const url of queue.slice(0, PREFETCH_WARM_NEWEST)) {
+                try {
+                    await c.ensureBlobUrl(cacheKeyForUrl(url), { bumpUsage: false });
+                } catch {
+                    // ignore
+                }
+            }
+        };
 
+        // Already at / over 1/3 capacity — only warm a small newest slice
+        if (c.bytes() >= targetBytes) {
+            await warmNewest();
+            return;
+        }
+
+        // Disk-first fill to 1/3. Soft RAM unload runs inside put; no per-file blob mint.
+        let steps = 0;
         for (const url of queue) {
-            if (sessionBytes >= targetBytes || filesDone >= PREFETCH_MAX_FILES) break;
+            if (c.bytes() >= targetBytes) break;
             try {
                 const key = cacheKeyForUrl(url);
-                if (c.has(key) || c.has(url)) {
-                    await c.ensureBlobUrl(key, { bumpUsage: false });
-                    filesDone += 1;
-                    continue;
-                }
-                const before = c.bytes();
+                if (c.has(key) || c.has(url)) continue;
                 await ensureCached(c, url, { allowEvict: false, ...autoCacheOpts() });
-                sessionBytes += Math.max(0, c.bytes() - before);
-                await c.ensureBlobUrl(key, { bumpUsage: false });
-                filesDone += 1;
+                // yield so Discord UI / input stay responsive during a long 1/3 fill
+                steps += 1;
+                if (steps % 2 === 0) {
+                    await new Promise(r => setTimeout(r, 0));
+                }
             } catch {
                 // skip bad urls
             }
         }
+
+        await warmNewest();
     } catch {
         // never take discord down
     }
