@@ -35,6 +35,11 @@ export const settings = definePluginSettings({
         default: 500,
         onChange: () => settingsHooks.onLimitsChange(),
     },
+    skipLargeFiles: {
+        type: OptionType.BOOLEAN,
+        description: "Skip files over 12 MB",
+        default: true,
+    },
     // Path is only set via Choose folder button — keep store, hide text field
     cacheDirectory: {
         type: OptionType.STRING,
