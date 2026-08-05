@@ -1,3 +1,5 @@
+import { isGifProviderHost, mediaLookupKeys } from "./hosts";
+
 export interface FavoriteGifRef {
     url: string;
     src: string;
@@ -86,12 +88,7 @@ export function cacheKeyForUrl(url: string) {
     if (!url) return url;
     try {
         const u = new URL(url);
-        if (
-            u.hostname.includes("tenor.com")
-            || u.hostname.includes("giphy.com")
-            || u.hostname.includes("discordapp")
-            || u.hostname.includes("discord.com")
-        ) {
+        if (isGifProviderHost(u.hostname) || u.hostname.includes("discord.com")) {
             return `${u.origin}${u.pathname}`;
         }
         return u.href;
@@ -103,12 +100,10 @@ export function cacheKeyForUrl(url: string) {
 export function keysForFavorite(ref: FavoriteGifRef) {
     const keys = new Set<string>();
     if (ref.url) {
-        keys.add(cacheKeyForUrl(ref.url));
-        keys.add(ref.url);
+        for (const k of mediaLookupKeys(ref.url)) keys.add(k);
     }
     if (ref.src) {
-        keys.add(cacheKeyForUrl(ref.src));
-        keys.add(ref.src);
+        for (const k of mediaLookupKeys(ref.src)) keys.add(k);
     }
     return [...keys];
 }
@@ -118,16 +113,7 @@ export function isLikelyGifMediaUrl(url: string) {
     if (url.startsWith("blob:") || url.startsWith("data:")) return false;
     try {
         const u = new URL(url);
-        const host = u.hostname;
-        if (
-            host.includes("tenor.com")
-            || host.includes("giphy.com")
-            || host.includes("media.discordapp")
-            || host.includes("cdn.discordapp")
-            || host.includes("discordapp.net")
-        ) {
-            return true;
-        }
+        if (isGifProviderHost(u.hostname)) return true;
         return /\.(gif|mp4|webm|webp|png|jpe?g)(\?|$)/i.test(u.pathname);
     } catch {
         return false;
@@ -136,7 +122,7 @@ export function isLikelyGifMediaUrl(url: string) {
 
 /**
  * URL looks like an explicit video file.
- * Small Tenor mp4 "gifs" may still be cached if under the per-file size cap in media.ts.
+ * Small Tenor/Klipy mp4 "gifs" may still be cached if under the per-file size cap in media.ts.
  */
 export function isHeavyVideoUrl(url: string) {
     if (!url || typeof url !== "string") return false;
