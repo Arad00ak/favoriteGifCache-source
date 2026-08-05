@@ -20,48 +20,48 @@ export const settingsHooks = {
 export const settings = definePluginSettings({
     cacheUsage: {
         type: OptionType.COMPONENT,
-        description: "Cache usage and actions",
+        description: "Storage",
         component: () => (usageComponent ? usageComponent() : null),
     },
     maxEntries: {
         type: OptionType.NUMBER,
-        description: "How many favorite GIFs to keep on disk (default 500)",
+        description: "Max number of GIFs to save",
         default: DEFAULT_MAX_ENTRIES,
         onChange: () => settingsHooks.onLimitsChange(),
     },
     maxMegabytes: {
         type: OptionType.NUMBER,
-        description: "Max total cache size in MB (default 500)",
+        description: "Max space the cache can use (MB)",
         default: 500,
         onChange: () => settingsHooks.onLimitsChange(),
     },
     skipLargeFiles: {
         type: OptionType.BOOLEAN,
-        description: "Skip files over 12 MB",
+        description: "Don't save files bigger than 12 MB",
         default: true,
     },
-    // Path is only set via Choose folder button — keep store, hide text field
+    // set via Choose folder button only
     cacheDirectory: {
         type: OptionType.STRING,
-        description: "Cache folder path",
+        description: "Cache folder",
         default: "",
         hidden: true,
         onChange: () => settingsHooks.onCacheDirectoryChange(),
     },
     smartEviction: {
         type: OptionType.BOOLEAN,
-        description: "When full, replace least-used GIFs for new favorites / sends. Off = never delete for new downloads",
+        description: "When full, delete least-used GIFs to make room",
         default: true,
         onChange: () => settingsHooks.onSmartEvictionChange(),
     },
     prefetchOnStart: {
         type: OptionType.BOOLEAN,
-        description: "On start, download newest favorites first until cache reaches 1/3 of max capacity",
+        description: "Download some favorites in the background after Discord starts",
         default: true,
     },
     rewriteFavoriteSrc: {
         type: OptionType.BOOLEAN,
-        description: "Point favorite thumbnails at local blob URLs when we have them cached",
+        description: "Load cached GIFs from disk instead of the internet",
         default: true,
     },
 });

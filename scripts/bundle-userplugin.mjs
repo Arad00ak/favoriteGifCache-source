@@ -33,13 +33,16 @@ function stripModule(src, filename) {
         s = s.replace(/^export\s+default\s+/gm, "");
     }
     s = s.replace(/^export\s\{[^}]+\};?\s*$/gm, "");
+    // drop re-export type lists (invalid when "export" is stripped)
+    s = s.replace(/^export\s+type\s*\{[^}]+\};?\s*$/gm, "");
     s = s.replace(/^export\s+(async\s+)?function\b/gm, "$1function");
     s = s.replace(/^export\s+class\b/gm, "class");
     s = s.replace(/^export\s+const\b/gm, "const");
     s = s.replace(/^export\s+let\b/gm, "let");
     s = s.replace(/^export\s+var\b/gm, "var");
     s = s.replace(/^export\s+enum\b/gm, "enum");
-    s = s.replace(/^export\s+type\b/gm, "type");
+    // type Foo = ...  (not type { ... })
+    s = s.replace(/^export\s+type\s+([A-Za-z_])/gm, "type $1");
     s = s.replace(/^export\s+interface\b/gm, "interface");
     // denylist uses DataStore namespace import — keep usage, import is top-level
     s = s.replace(/\n{3,}/g, "\n\n");

@@ -17,7 +17,7 @@ function barColor(pct: number) {
     return "var(--brand-500, #5865f2)";
 }
 
-function toast(message: string, type: any) {
+function showToast(message: string, type: any) {
     try {
         Toasts.show({
             message,
@@ -111,7 +111,7 @@ export function CacheUsageBar() {
                 const mb = cache.getMaxBytes();
                 setMaxBytes(Number.isFinite(mb) ? mb : DEFAULT_MAX_BYTES);
                 const dir = (settings.store.cacheDirectory || "").trim();
-                setPathLabel(dir || "IndexedDB (default)");
+                setPathLabel(dir || "Default (in Discord data)");
                 setReady(true);
             } catch {
                 if (alive) setReady(false);
@@ -135,10 +135,10 @@ export function CacheUsageBar() {
         try {
             const cache = getActiveCache() ?? await rebuildActiveCache();
             await cache.clear();
-            toast("Favorite GIF cache cleared", Toasts.Type.SUCCESS);
+            showToast("Favorite GIF cache cleared", Toasts.Type.SUCCESS);
             setTick(t => t + 1);
         } catch {
-            toast("Failed to clear cache", Toasts.Type.FAILURE);
+            showToast("Failed to clear cache", Toasts.Type.FAILURE);
         } finally {
             setBusy(false);
         }
@@ -147,7 +147,7 @@ export function CacheUsageBar() {
     const onBrowse = async () => {
         const native = getPluginNative();
         if (!native?.pickCacheDirectory) {
-            toast("Folder picker unavailable — restart Discord after updating", Toasts.Type.FAILURE);
+            showToast("Folder picker unavailable — restart Discord after updating", Toasts.Type.FAILURE);
             return;
         }
         setBusy(true);
@@ -166,10 +166,10 @@ export function CacheUsageBar() {
             }
             settings.store.cacheDirectory = picked;
             await rebuildActiveCache();
-            toast("Cache folder updated", Toasts.Type.SUCCESS);
+            showToast("Cache folder updated", Toasts.Type.SUCCESS);
             setTick(t => t + 1);
         } catch (e) {
-            toast(e instanceof Error ? e.message : "Could not set folder", Toasts.Type.FAILURE);
+            showToast(e instanceof Error ? e.message : "Could not set folder", Toasts.Type.FAILURE);
         } finally {
             setBusy(false);
         }
@@ -180,10 +180,10 @@ export function CacheUsageBar() {
         try {
             settings.store.cacheDirectory = "";
             await rebuildActiveCache();
-            toast("Using default storage", Toasts.Type.SUCCESS);
+            showToast("Using default storage", Toasts.Type.SUCCESS);
             setTick(t => t + 1);
         } catch {
-            toast("Failed to reset storage", Toasts.Type.FAILURE);
+            showToast("Failed to reset storage", Toasts.Type.FAILURE);
         } finally {
             setBusy(false);
         }
@@ -204,7 +204,7 @@ export function CacheUsageBar() {
                 fontWeight: 600,
                 marginBottom: 4,
             }}>
-                Cache usage
+                Storage
             </div>
             <div style={{
                 marginBottom: 12,
@@ -213,8 +213,8 @@ export function CacheUsageBar() {
                 lineHeight: "18px",
             }}>
                 {ready
-                    ? `${leftMB} MB free · snapshot when you open this page`
-                    : "Enable the plugin (or wait a moment) to load stats."}
+                    ? `${leftMB} MB free`
+                    : "Turn the plugin on to see usage."}
             </div>
 
             <UsageBar
