@@ -70,18 +70,16 @@ export function sortFavoritesNewestFirst(refs: FavoriteGifRef[]): FavoriteGifRef
     });
 }
 
-/** Hard cap for startup prefetch so boot never tries to pull ~1/3 of a 500 MB budget. */
-export const PREFETCH_MAX_BYTES = 32 * 1024 * 1024;
-/** Max number of files startup prefetch will touch (disk can still grow via normal use). */
-export const PREFETCH_MAX_FILES = 40;
+/** How many newest favorites to mint blob URLs for after prefetch (not the whole 1/3 fill). */
+export const PREFETCH_WARM_NEWEST = 16;
 
 /**
- * Startup prefetch byte budget: min(1/3 max size, PREFETCH_MAX_BYTES).
- * Disk cap stays maxMegabytes; this only limits how aggressive boot fill is.
+ * Startup prefetch byte budget: 1/3 of max cache size (e.g. 500 MB → ~167 MB).
+ * Bytes go to disk; soft RAM budget keeps the renderer heap safe.
  */
 export function prefetchTargetBytes(maxBytes: number): number {
     if (!Number.isFinite(maxBytes) || maxBytes <= 0) return 0;
-    return Math.max(1, Math.min(PREFETCH_MAX_BYTES, Math.floor(maxBytes / 3)));
+    return Math.max(1, Math.floor(maxBytes / 3));
 }
 
 export function cacheKeyForUrl(url: string) {

@@ -68,7 +68,12 @@ export class FavoriteGifCache {
             this.ready = (async () => {
                 await this.backend.open();
                 const all = await this.backend.getAll();
-                for (const entry of all) this.core.loadEntry(entry);
+                // Load one-by-one and soft-unload as we go so a 167–500 MB catalog
+                // never spikes the whole thing into the renderer heap at once.
+                for (const entry of all) {
+                    this.core.loadEntry(entry);
+                    for (const key of this.core.ensureSoftMemory()) this.revokeBlob(key);
+                }
 
                 // only trim if the user lowered the size setting since last run
                 const before = new Set(this.core.keys());
@@ -78,8 +83,6 @@ export class FavoriteGifCache {
                     : [...before].filter(k => !this.core.has(k));
                 if (gone.length) await this.backend.deleteMany(gone);
 
-                // Drop cold payloads so a big disk cache cannot OOM Discord on boot.
-                // Do NOT warm every blob URL here — picker warms only what it shows.
                 for (const key of this.core.ensureSoftMemory()) this.revokeBlob(key);
 
                 this.initDone = true;
