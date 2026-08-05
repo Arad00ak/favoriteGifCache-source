@@ -4,20 +4,11 @@ Equicord / Vencord userplugin. Keeps your Discord GIF picker favorites on your m
 
 ## Install (users)
 
-Don't clone this repo into `userplugins`. Use the install package:
+Do not clone **this** repo into `userplugins`. Use the install package (single `index.tsx` + `native.ts`):
 
 https://github.com/Arad00ak/FavoriteGifCache-userplugin
 
-```bash
-cd src/userplugins
-git clone https://github.com/Arad00ak/FavoriteGifCache-userplugin FavoriteGifCache
-```
-
-Then rebuild Equicord, inject/restart Discord, and enable **FavoriteGifCache**.
-
-Right-click menu (**Cache GIF** / **Remove from cache**) needs Equicord’s **ExtraContextMenusAPI** (built-in required API — leave it on).
-
-More detail: https://discord.com/channels/1015060230222131221/1257038407503446176
+That repo’s README has step-by-step install for Equicord and Vencord.
 
 ## How it works
 
