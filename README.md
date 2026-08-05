@@ -6,11 +6,11 @@ Equicord / Vencord userplugin. Keeps your Discord GIF picker favorites on your m
 
 Don't clone this repo into `userplugins`. Use the install package:
 
-https://github.com/Arad00ak/FavoriteGifCache-userplugin
+https://github.com/Arad00ak/favoriteGifCache
 
 ```bash
 cd src/userplugins
-git clone https://github.com/Arad00ak/FavoriteGifCache-userplugin favoriteGifCache
+git clone https://github.com/Arad00ak/favoriteGifCache favoriteGifCache
 ```
 
 Then rebuild, restart Discord, and turn the plugin on.
@@ -57,7 +57,7 @@ Favorites still pointing at Tenor media hosts are tried first. If the download f
 | Repo | Purpose |
 |------|---------|
 | **This one** | Source, tests, bundler |
-| **FavoriteGifCache-userplugin** | What people clone into `userplugins` (`index.tsx` at root) |
+| **favoriteGifCache** | What people clone into `userplugins` (`index.tsx` at root) |
 
 Edit files under `plugin/`, then:
 
@@ -65,7 +65,7 @@ Edit files under `plugin/`, then:
 npm run bundle:userplugin
 ```
 
-That rebuilds the single-file package in `../FavoriteGifCache-userplugin`.
+That rebuilds the single-file package in `../favoriteGifCache`.
 
 ## Dev
 
