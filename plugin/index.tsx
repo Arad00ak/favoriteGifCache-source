@@ -33,7 +33,7 @@ import {
 } from "./gifCache";
 import { cacheOnUserAction, ensureCached, installFetchInterceptor, MAX_ENTRY_BYTES } from "./media";
 import { getPluginNative } from "./nativeApi";
-import { setUsageBarComponent, settings, settingsHooks } from "./settings";
+import { purgeStalePluginSettings, setUsageBarComponent, settings, settingsHooks } from "./settings";
 import { createBackendForPath } from "./storage";
 
 export { settings };
@@ -528,6 +528,8 @@ export default definePlugin({
 
     async start() {
         try {
+            // strip removed options (maxEntries, showCacheBadges, …) from saved settings
+            purgeStalePluginSettings();
             await loadDenylist();
             // loads IndexedDB from last session — does not wipe on restart
             await applyMaxFromSettings();
