@@ -1,11 +1,9 @@
 import type { FavoriteGifCache } from "./gifCache";
 import {
     cacheKeyForUrl,
-    isCacheableFavoriteUrl,
-    isHeavyVideoMime,
-    isHeavyVideoUrl,
     isLikelyGifMediaUrl,
 } from "./favorites";
+import { mediaDownloadCandidates, mediaLookupKeys } from "./hosts";
 import { getPluginNative } from "./nativeApi";
 
 const inflight = new Map<string, Promise<{ data: Uint8Array; mime: string; } | null>>();
@@ -28,13 +26,12 @@ function guessMime(url: string, contentType: string | null) {
 }
 
 /**
- * Pull bytes for a favorite media URL.
- * Prefers native (main process) so Discord renderer CORS cannot block Tenor/CDN.
+ * Try a single media URL once (native preferred, then optional renderer fetch).
  */
-export async function downloadFavoriteMedia(
+async function downloadOneUrl(
     url: string,
-    fetchImpl: typeof fetch = fetch,
-    maxBytes = MAX_ENTRY_BYTES,
+    fetchImpl: typeof fetch,
+    maxBytes: number,
 ): Promise<{ data: Uint8Array; mime: string; } | null> {
     const native = getPluginNative();
     if (native && typeof (native as any).fetchMedia === "function") {
@@ -52,14 +49,12 @@ export async function downloadFavoriteMedia(
                 }
             }
         } catch {
-            // fall through to renderer fetch
+            // try next strategy / candidate
         }
+        // native available but this URL failed — try next candidate (e.g. Klipy fallback)
+        // still allow renderer only when no native at all (below)
+        return null;
     }
-
-    // Renderer fallback: credentials "include" causes CORS storms and can tank Discord.
-    // Prefer omit; if native already exists and failed, skip fallback entirely.
-    const nativeAvailable = !!(native && typeof (native as any).fetchMedia === "function");
-    if (nativeAvailable) return null;
 
     try {
         const res = await fetchImpl(url, {
@@ -77,17 +72,38 @@ export async function downloadFavoriteMedia(
     }
 }
 
+/**
+ * Pull bytes for a favorite media URL.
+ * Prefers native (main process). On Tenor failure, tries Klipy host-swap candidates.
+ */
+export async function downloadFavoriteMedia(
+    url: string,
+    fetchImpl: typeof fetch = fetch,
+    maxBytes = MAX_ENTRY_BYTES,
+): Promise<{ data: Uint8Array; mime: string; fromUrl?: string; } | null> {
+    const candidates = mediaDownloadCandidates(url);
+    for (const candidate of candidates) {
+        const hit = await downloadOneUrl(candidate, fetchImpl, maxBytes);
+        if (hit) return { ...hit, fromUrl: candidate };
+    }
+    return null;
+}
+
 export async function getCachedBytes(cache: FavoriteGifCache, url: string) {
     await cache.init();
-    const key = cacheKeyForUrl(url);
 
     // peek first so miss path does not thrash metadata writes
-    let entry = cache.peekSync(key);
-    if (!entry && key !== url) entry = cache.peekSync(url);
-
-    if (entry) {
-        cache.touchSync(entry.key);
-        return { data: entry.data.slice(), mimeType: entry.mimeType, key: entry.key };
+    // also check Klipy rewrites of Tenor so a fallback store still hits
+    for (const key of mediaLookupKeys(url)) {
+        if (!cache.has(key)) continue;
+        if (!cache.hasResidentData(key)) {
+            await cache.hydrate(key);
+        }
+        const entry = cache.peekSync(key);
+        if (entry && entry.data.byteLength > 0) {
+            cache.touchSync(entry.key);
+            return { data: entry.data.slice(), mimeType: entry.mimeType, key: entry.key };
+        }
     }
 
     return null;
@@ -147,12 +163,19 @@ export async function ensureCached(
     const downloaded = await pending;
     if (!downloaded) return null;
 
-    // Skip only truly huge videos; normal Tenor "gif" mp4s under the cap are OK
+    // Skip only truly huge videos; normal Tenor/Klipy "gif" mp4s under the cap are OK
     if (downloaded.data.byteLength > maxBytes) {
         return null;
     }
 
+    // Always store under the original favorite key so Discord's Tenor URL still resolves
     await cache.put(key, downloaded.data, downloaded.mime, { allowEvict });
+
+    // Also index under the successful Klipy (or other) URL when fallback was used
+    const fromKey = downloaded.fromUrl ? cacheKeyForUrl(downloaded.fromUrl) : null;
+    if (fromKey && fromKey !== key) {
+        await cache.put(fromKey, downloaded.data, downloaded.mime, { allowEvict: false });
+    }
 
     let entry = cache.peekSync(key);
     if (!entry && allowEvict) {

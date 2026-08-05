@@ -8,6 +8,7 @@ import {
     type PutOptions,
     type PutResult,
 } from "./cacheCore";
+import { mediaLookupKeys } from "./hosts";
 import {
     createDefaultBackend,
     MemoryStorageBackend,
@@ -300,20 +301,8 @@ export class FavoriteGifCache {
             return remoteUrl || null;
         }
 
-        const candidates = [remoteUrl];
-        try {
-            const u = new URL(remoteUrl);
-            if (
-                u.hostname.includes("tenor.com")
-                || u.hostname.includes("giphy.com")
-                || u.hostname.includes("discordapp")
-                || u.hostname.includes("discord.com")
-            ) {
-                candidates.unshift(`${u.origin}${u.pathname}`);
-            }
-        } catch {
-            // keep raw
-        }
+        // Tenor + Klipy rewrites so a favorite still shows if stored under either host
+        const candidates = mediaLookupKeys(remoteUrl);
 
         for (const key of candidates) {
             const hot = this.blobUrls.get(key);
