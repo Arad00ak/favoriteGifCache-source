@@ -1,3 +1,9 @@
+/*
+ * Vencord, a Discord client mod
+ * Copyright (c) 2026 Arad and contributors
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ */
+
 /** Soft size budget shown in settings and enforced on put / load (disk + catalog). */
 export const DEFAULT_MAX_BYTES = 500 * 1024 * 1024;
 /**

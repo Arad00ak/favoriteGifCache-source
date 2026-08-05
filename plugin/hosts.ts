@@ -1,3 +1,9 @@
+/*
+ * Vencord, a Discord client mod
+ * Copyright (c) 2026 Arad and contributors
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ */
+
 /**
  * GIF CDN host helpers.
  * Tenor (media CDN) is sunsetting third-party use; Discord and others move to Klipy.
