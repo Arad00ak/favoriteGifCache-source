@@ -110,4 +110,18 @@ describe("GifCacheCore", () => {
         assert.equal(c.size(), 50);
         assert.equal(c.bytes(), 50);
     });
+
+    it("soft memory unloads cold payloads without dropping catalog", () => {
+        const c = new GifCacheCore({ maxBytes: 1000, softMemoryBytes: 10, now: () => 1 });
+        assert.equal(c.put("a", new Uint8Array(6).fill(1)).stored, true);
+        assert.equal(c.put("b", new Uint8Array(6).fill(2)).stored, true);
+        // both cataloged
+        assert.equal(c.size(), 2);
+        assert.equal(c.bytes(), 12);
+        // one payload dropped to stay under soft RAM
+        assert.ok(c.residentBytes() <= 10);
+        assert.equal(c.has("a"), true);
+        assert.equal(c.has("b"), true);
+        assert.ok(c.needsHydrate("a") || c.needsHydrate("b"));
+    });
 });
