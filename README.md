@@ -31,11 +31,11 @@ So the first view can still hit the network. After that, hits should be local an
 
 ### On startup (if prefetch is on)
 
-It walks your favorites from newest to older and downloads until the cache hits about **1/3** of max capacity (e.g. max 500 → stop around 166). It does not fill the whole cache on boot on purpose.
+It walks your favorites from newest to older and downloads until the cache hits about **1/3** of max size (default 500 MB → ~167 MB). It does not fill the whole cache on boot on purpose.
 
 ### When you're using the picker
 
-- **Scroll:** only fills free slots. If the cache is full, it does not kick old stuff just because you scrolled.
+- **Scroll:** only fills free space. If the cache is full, it does not kick old stuff just because you scrolled.
 - **New favorite / send:** can store the GIF. If the cache is full and smart eviction is on, it drops the least-used one first.
 - **Right-click:** Cache GIF or Remove from cache. Remove also blocks auto-cache for that URL until you Cache it again.
 

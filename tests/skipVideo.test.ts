@@ -20,7 +20,6 @@ describe("media size / video rules", () => {
 
     it("stores normal gif bytes", async () => {
         const cache = createFavoriteGifCache({
-            maxEntries: 10,
             backend: new MemoryStorageBackend(),
         });
         const fakeFetch: typeof fetch = async () =>
@@ -35,7 +34,6 @@ describe("media size / video rules", () => {
 
     it("stores small video/gif mp4 under the per-file cap", async () => {
         const cache = createFavoriteGifCache({
-            maxEntries: 10,
             backend: new MemoryStorageBackend(),
         });
         const body = new Uint8Array(1024);
@@ -51,7 +49,6 @@ describe("media size / video rules", () => {
 
     it("rejects oversized files", async () => {
         const cache = createFavoriteGifCache({
-            maxEntries: 10,
             backend: new MemoryStorageBackend(),
         });
         const huge = new Uint8Array(MAX_ENTRY_BYTES + 100);

@@ -1,7 +1,7 @@
 import {
     createFavoriteGifCache,
     MemoryStorageBackend,
-    DEFAULT_MAX_ENTRIES,
+    DEFAULT_MAX_BYTES,
 } from "../plugin/gifCache.ts";
 
 function fail(msg: string): never {
@@ -15,17 +15,17 @@ function bytes(s: string) {
 
 async function main() {
     console.log("FavoriteGifCache smoke");
-    if (DEFAULT_MAX_ENTRIES !== 500) fail("default max should be 500");
+    if (DEFAULT_MAX_BYTES !== 500 * 1024 * 1024) fail("default max should be 500 MB");
 
     const backend = new MemoryStorageBackend();
     let t = 0;
     const cache = createFavoriteGifCache({
-        maxEntries: 2,
+        maxBytes: 2,
         backend,
         now: () => ++t,
     });
 
-    const payload = bytes("smoke-gif-bytes");
+    const payload = bytes("s"); // 1 byte
     if (!(await cache.put("https://media.tenor.com/smoke.gif", payload, "image/gif")).stored) {
         fail("put should store");
     }
@@ -37,9 +37,9 @@ async function main() {
     console.log("put→get ok, useCount=", hit.useCount);
 
     // full cache should refuse a third entry without allowEvict
-    await cache.put("keep-hot", bytes("hot"));
+    await cache.put("keep-hot", bytes("h"));
     await cache.get("keep-hot");
-    const blocked = await cache.put("incoming", bytes("new"));
+    const blocked = await cache.put("incoming", bytes("n"));
     if (blocked.stored) fail("should not store when full without allowEvict");
     if (!cache.has("https://media.tenor.com/smoke.gif") || !cache.has("keep-hot")) {
         fail("existing entries must stay when full put is refused");
@@ -47,7 +47,7 @@ async function main() {
     console.log("no thrash when full ok");
 
     // restart simulation
-    const again = createFavoriteGifCache({ maxEntries: 2, backend });
+    const again = createFavoriteGifCache({ maxBytes: 2, backend });
     await again.init();
     if (!(await again.peek("keep-hot"))) fail("disk data missing after re-init");
     console.log("persist across re-init ok");
@@ -55,7 +55,7 @@ async function main() {
     // allowEvict path still works when we intentionally reclaim
     const ev = await again.put("forced", bytes("F"), "image/gif", { allowEvict: true });
     if (!ev.stored) fail("allowEvict put should store");
-    if (again.size() > 2) fail("over cap after allowEvict");
+    if (again.bytes() > 2) fail("over cap after allowEvict");
     console.log("SMOKE PASS");
 }
 

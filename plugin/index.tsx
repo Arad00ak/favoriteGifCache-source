@@ -22,14 +22,13 @@ import {
     isHeavyVideoUrl,
     isLikelyGifMediaUrl,
     keysForFavorite,
-    prefetchTargetCount,
+    prefetchTargetBytes,
     sortFavoritesNewestFirst,
     type FavoriteGifRef,
 } from "./favorites";
 import {
     createFavoriteGifCache,
     DEFAULT_MAX_BYTES,
-    DEFAULT_MAX_ENTRIES,
     type FavoriteGifCache,
 } from "./gifCache";
 import { cacheOnUserAction, ensureCached, installFetchInterceptor, MAX_ENTRY_BYTES } from "./media";
@@ -69,7 +68,6 @@ function createBackend() {
 function getCache() {
     if (!cache) {
         cache = createFavoriteGifCache({
-            maxEntries: settings.store.maxEntries || DEFAULT_MAX_ENTRIES,
             maxBytes: maxBytesFromSettings(),
             backend: createBackend(),
             smartEviction: settings.store.smartEviction !== false,
@@ -95,8 +93,6 @@ async function applyLimitsFromSettings() {
     try {
         const c = getCache();
         await c.init();
-        const max = Math.max(1, Number(settings.store.maxEntries) || DEFAULT_MAX_ENTRIES);
-        await c.setMaxEntries(max);
         await c.setMaxBytes(maxBytesFromSettings());
         c.setSmartEviction(settings.store.smartEviction !== false);
         c.warmAllBlobUrls();
@@ -276,7 +272,7 @@ async function manualRemoveFromCache(url: string) {
 
 /**
  * Startup auto-download:
- * newest favorite first, walk older, stop once cache size hits 1/3 of max capacity.
+ * newest favorite first, walk older, stop once cache bytes hit 1/3 of max size.
  * Never evicts during prefetch.
  */
 async function prefetchFavorites() {
@@ -291,7 +287,7 @@ async function prefetchFavorites() {
             refs = getFavoriteGifRefsFromFrecency();
         }
 
-        const target = prefetchTargetCount(c.getMaxEntries());
+        const targetBytes = prefetchTargetBytes(c.getMaxBytes());
         // already at / over 1/3 capacity — only warm blobs for newest slice
         const newest = sortFavoritesNewestFirst(refs);
         const queue: string[] = [];
@@ -306,8 +302,8 @@ async function prefetchFavorites() {
         }
         if (!queue.length) return;
 
-        if (c.size() >= target) {
-            for (const url of queue.slice(0, target)) {
+        if (c.bytes() >= targetBytes) {
+            for (const url of queue) {
                 c.ensureBlobUrlSync(cacheKeyForUrl(url), { bumpUsage: false });
             }
             return;
@@ -315,7 +311,7 @@ async function prefetchFavorites() {
 
         // Sequential newest→older so we fill 1/3 with the latest gifs, not random workers
         for (const url of queue) {
-            if (c.size() >= target) break;
+            if (c.bytes() >= targetBytes) break;
             try {
                 const key = cacheKeyForUrl(url);
                 if (c.has(key) || c.has(url)) {
@@ -491,11 +487,9 @@ export default definePlugin({
                         if (!u || isAutoCacheDenied(u)) continue;
                         const key = cacheKeyForUrl(u);
 
-                        // Scrolling: only fill free slots, never thrash-evict
+                        // Scrolling: fill free space only, never thrash-evict
                         if (!c.has(key) && !c.has(u)) {
-                            if (c.size() < c.getMaxEntries()) {
-                                await ensureCached(c, u, { allowEvict: false, ...autoCacheOpts() });
-                            }
+                            await ensureCached(c, u, { allowEvict: false, ...autoCacheOpts() });
                         }
 
                         const blob = c.ensureBlobUrlSync(key, { bumpUsage: false })
@@ -573,7 +567,7 @@ export default definePlugin({
 
 export {
     createFavoriteGifCache,
-    DEFAULT_MAX_ENTRIES,
+    DEFAULT_MAX_BYTES,
     FavoriteGifCache,
 } from "./gifCache";
 export { GifCacheCore } from "./cacheCore";

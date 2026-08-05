@@ -2,7 +2,7 @@ import { Button } from "@components/Button";
 import { Toasts, useEffect, useState } from "@webpack/common";
 
 import { getActiveCache, rebuildActiveCache } from "./cacheAccess";
-import { DEFAULT_MAX_BYTES, DEFAULT_MAX_ENTRIES } from "./gifCache";
+import { DEFAULT_MAX_BYTES } from "./gifCache";
 import { getPluginNative } from "./nativeApi";
 import { settings } from "./settings";
 
@@ -82,7 +82,6 @@ function UsageBar(props: {
 export function CacheUsageBar() {
     const [count, setCount] = useState(0);
     const [bytes, setBytes] = useState(0);
-    const [maxEntries, setMaxEntries] = useState(DEFAULT_MAX_ENTRIES);
     const [maxBytes, setMaxBytes] = useState(DEFAULT_MAX_BYTES);
     const [ready, setReady] = useState(false);
     const [busy, setBusy] = useState(false);
@@ -107,7 +106,6 @@ export function CacheUsageBar() {
                 if (!alive) return;
                 setCount(cache.size());
                 setBytes(cache.bytes());
-                setMaxEntries(cache.getMaxEntries());
                 const mb = cache.getMaxBytes();
                 setMaxBytes(Number.isFinite(mb) ? mb : DEFAULT_MAX_BYTES);
                 const dir = (settings.store.cacheDirectory || "").trim();
@@ -123,12 +121,12 @@ export function CacheUsageBar() {
         };
     }, [tick]);
 
-    const entryPct = maxEntries > 0 ? (count / maxEntries) * 100 : 0;
     const bytePct = maxBytes > 0 ? (bytes / maxBytes) * 100 : 0;
     const usedMB = formatMB(bytes);
     const maxMB = formatMB(maxBytes);
     const leftMB = formatMB(Math.max(0, maxBytes - bytes));
     const hasCustomPath = !!(settings.store.cacheDirectory || "").trim();
+    const gifLabel = count === 1 ? "1 GIF" : `${count} GIFs`;
 
     const onClear = async () => {
         setBusy(true);
@@ -213,15 +211,10 @@ export function CacheUsageBar() {
                 lineHeight: "18px",
             }}>
                 {ready
-                    ? `${leftMB} MB free`
+                    ? `${gifLabel} · ${leftMB} MB free`
                     : "Turn the plugin on to see usage."}
             </div>
 
-            <UsageBar
-                label="GIFs"
-                valueText={`${count} / ${maxEntries}`}
-                percent={entryPct}
-            />
             <UsageBar
                 label="Size"
                 valueText={`${usedMB} MB / ${maxMB} MB`}

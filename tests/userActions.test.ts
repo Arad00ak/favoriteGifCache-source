@@ -20,7 +20,7 @@ describe("user actions vs scroll fill", () => {
     it("scroll fill does not evict when full", async () => {
         let t = 0;
         const cache = createFavoriteGifCache({
-            maxEntries: 2,
+            maxBytes: 2,
             backend: new MemoryStorageBackend(),
             now: () => ++t,
         });
@@ -41,8 +41,9 @@ describe("user actions vs scroll fill", () => {
 
     it("new favorite / send (cacheOnUserAction) evicts least-used when full", async () => {
         let t = 0;
+        // IDLE(4)+HOT(3)=7 fills budget; NEW(3) needs to evict IDLE
         const cache = createFavoriteGifCache({
-            maxEntries: 2,
+            maxBytes: 7,
             backend: new MemoryStorageBackend(),
             now: () => ++t,
             smartEviction: true,
@@ -62,13 +63,12 @@ describe("user actions vs scroll fill", () => {
         assert.equal(cache.has("https://media.tenor.com/new-fav.gif"), true);
         assert.equal(cache.has("https://media.tenor.com/hot.gif"), true);
         assert.equal(cache.has("https://media.tenor.com/idle.gif"), false);
-        assert.equal(cache.size(), 2);
     });
 
     it("smartEviction off refuses store when full instead of deleting", async () => {
         let t = 0;
         const cache = createFavoriteGifCache({
-            maxEntries: 2,
+            maxBytes: 2,
             backend: new MemoryStorageBackend(),
             now: () => ++t,
             smartEviction: false,
@@ -90,8 +90,9 @@ describe("user actions vs scroll fill", () => {
 
     it("send path works after a scroll miss left the entry unstored", async () => {
         let t = 0;
+        // KEEP(4) fills 5-byte budget for second 5-byte body without eviction
         const cache = createFavoriteGifCache({
-            maxEntries: 1,
+            maxBytes: 5,
             backend: new MemoryStorageBackend(),
             now: () => ++t,
         });

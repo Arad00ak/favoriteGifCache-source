@@ -1,21 +1,20 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
-import { DEFAULT_MAX_BYTES, DEFAULT_MAX_ENTRIES, GifCacheCore } from "../plugin/cacheCore.ts";
+import { DEFAULT_MAX_BYTES, GifCacheCore } from "../plugin/cacheCore.ts";
 
 function bytes(label: string) {
     return new TextEncoder().encode(label);
 }
 
 describe("GifCacheCore", () => {
-    it("defaults to 500 slots", () => {
+    it("defaults size budget to infinity unless set", () => {
         const c = new GifCacheCore();
-        assert.equal(c.getMaxEntries(), DEFAULT_MAX_ENTRIES);
-        assert.equal(DEFAULT_MAX_ENTRIES, 500);
+        assert.equal(c.getMaxBytes(), Number.POSITIVE_INFINITY);
+        assert.equal(DEFAULT_MAX_BYTES, 500 * 1024 * 1024);
     });
 
     it("defaults size budget to 500 MB when set via options", () => {
-        assert.equal(DEFAULT_MAX_BYTES, 500 * 1024 * 1024);
         const c = new GifCacheCore({ maxBytes: DEFAULT_MAX_BYTES });
         assert.equal(c.getMaxBytes(), DEFAULT_MAX_BYTES);
     });
@@ -41,7 +40,8 @@ describe("GifCacheCore", () => {
     });
 
     it("does not evict when full unless allowEvict is set", () => {
-        const c = new GifCacheCore({ maxEntries: 2, now: () => 1 });
+        // two 1-byte payloads fill a 2-byte budget
+        const c = new GifCacheCore({ maxBytes: 2, now: () => 1 });
         assert.equal(c.put("a", bytes("A")).stored, true);
         assert.equal(c.put("b", bytes("B")).stored, true);
 
@@ -56,7 +56,7 @@ describe("GifCacheCore", () => {
 
     it("allowEvict drops least-used and keeps hot entry", () => {
         let t = 0;
-        const c = new GifCacheCore({ maxEntries: 2, now: () => ++t });
+        const c = new GifCacheCore({ maxBytes: 2, now: () => ++t });
         c.put("old-low", bytes("A"));
         c.put("hot", bytes("B"));
         c.get("hot");
@@ -72,7 +72,7 @@ describe("GifCacheCore", () => {
 
     it("equal useCount tie-breaks on oldest lastUsed when allowing evict", () => {
         let t = 0;
-        const c = new GifCacheCore({ maxEntries: 2, now: () => ++t });
+        const c = new GifCacheCore({ maxBytes: 2, now: () => ++t });
         c.put("first", bytes("1"));
         c.put("second", bytes("2"));
 
@@ -83,7 +83,7 @@ describe("GifCacheCore", () => {
 
     it("protected keys are last to go when allowing evict", () => {
         let t = 0;
-        const c = new GifCacheCore({ maxEntries: 2, now: () => ++t });
+        const c = new GifCacheCore({ maxBytes: 2, now: () => ++t });
         c.put("protected", bytes("P"));
         c.put("expendable", bytes("E"));
         c.setProtectedKeys(["protected"]);
@@ -95,10 +95,19 @@ describe("GifCacheCore", () => {
     });
 
     it("overwrite same key does not grow size", () => {
-        const c = new GifCacheCore({ maxEntries: 2 });
+        const c = new GifCacheCore({ maxBytes: 20 });
         c.put("x", bytes("one"));
         c.put("x", bytes("two-two"));
         assert.equal(c.size(), 1);
         assert.deepEqual([...c.get("x")!.data], [...bytes("two-two")]);
+    });
+
+    it("no entry count cap — only byte budget matters", () => {
+        const c = new GifCacheCore({ maxBytes: 100 });
+        for (let i = 0; i < 50; i++) {
+            assert.equal(c.put(`k${i}`, bytes("X")).stored, true);
+        }
+        assert.equal(c.size(), 50);
+        assert.equal(c.bytes(), 50);
     });
 });

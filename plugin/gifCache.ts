@@ -1,6 +1,5 @@
 import {
     DEFAULT_MAX_BYTES,
-    DEFAULT_MAX_ENTRIES,
     GifCacheCore,
     type CacheCoreOptions,
     type CacheEntry,
@@ -14,7 +13,7 @@ import {
     type StorageBackend,
 } from "./storage";
 
-export { DEFAULT_MAX_BYTES, DEFAULT_MAX_ENTRIES, GifCacheCore };
+export { DEFAULT_MAX_BYTES, GifCacheCore };
 export type { CacheEntry, CacheMeta, PutOptions, PutResult, StorageBackend };
 export { MemoryStorageBackend };
 
@@ -70,9 +69,9 @@ export class FavoriteGifCache {
                 const all = await this.backend.getAll();
                 for (const entry of all) this.core.loadEntry(entry);
 
-                // only trim if the user lowered the setting since last run
+                // only trim if the user lowered the size setting since last run
                 const before = new Set(this.core.keys());
-                const removed = this.core.setMaxEntries(this.core.getMaxEntries());
+                const removed = this.core.setMaxBytes(this.core.getMaxBytes());
                 const gone = removed.length
                     ? removed
                     : [...before].filter(k => !this.core.has(k));
@@ -86,23 +85,8 @@ export class FavoriteGifCache {
         await this.ready;
     }
 
-    getMaxEntries() {
-        return this.core.getMaxEntries();
-    }
-
     getMaxBytes() {
         return this.core.getMaxBytes();
-    }
-
-    async setMaxEntries(n: number) {
-        await this.init();
-        const before = new Set(this.core.keys());
-        this.core.setMaxEntries(n);
-        const removed = [...before].filter(k => !this.core.has(k));
-        if (removed.length) {
-            await this.backend.deleteMany(removed);
-            for (const k of removed) this.revokeBlob(k);
-        }
     }
 
     async setMaxBytes(n: number) {
@@ -350,7 +334,6 @@ export class FavoriteGifCache {
 
 export function createFavoriteGifCache(options: FavoriteGifCacheOptions = {}) {
     return new FavoriteGifCache({
-        maxEntries: options.maxEntries ?? DEFAULT_MAX_ENTRIES,
         maxBytes: options.maxBytes ?? DEFAULT_MAX_BYTES,
         backend: options.backend,
         now: options.now,

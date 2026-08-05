@@ -70,10 +70,10 @@ export function sortFavoritesNewestFirst(refs: FavoriteGifRef[]): FavoriteGifRef
     });
 }
 
-/** How many entries startup prefetch should aim for: 1/3 of max capacity. */
-export function prefetchTargetCount(maxEntries: number): number {
-    const max = Math.max(1, Math.floor(maxEntries));
-    return Math.max(1, Math.floor(max / 3));
+/** Startup prefetch byte budget: 1/3 of max cache size (at least 1 byte). */
+export function prefetchTargetBytes(maxBytes: number): number {
+    if (!Number.isFinite(maxBytes) || maxBytes <= 0) return 0;
+    return Math.max(1, Math.floor(maxBytes / 3));
 }
 
 export function cacheKeyForUrl(url: string) {
