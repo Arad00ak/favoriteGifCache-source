@@ -27,14 +27,15 @@ describe("Tenor → Klipy fallback hosts", () => {
         const fallbacks = tenorToKlipyFallbackUrls("https://media.tenor.com/XxYyZz/cool.gif?x=1");
         assert.ok(fallbacks.length > 0);
         assert.ok(fallbacks.every(u => u.includes("klipy.com")));
-        assert.ok(fallbacks.some(u => u.startsWith("https://media.klipy.com/XxYyZz/cool.gif")));
+        // Prefer hosts that resolve today first
+        assert.ok(fallbacks[0]!.startsWith("https://static.klipy.com/XxYyZz/cool.gif"));
         assert.ok(fallbacks.every(u => u.includes("x=1")));
     });
 
     it("download candidates list original then klipy", () => {
         const c = mediaDownloadCandidates("https://media.tenor.com/id/file.gif");
         assert.equal(c[0], "https://media.tenor.com/id/file.gif");
-        assert.ok(c.some(u => u.includes("media.klipy.com")));
+        assert.ok(c.some(u => u.includes("static.klipy.com")));
         assert.equal(mediaDownloadCandidates("https://media.giphy.com/x.gif").length, 1);
     });
 

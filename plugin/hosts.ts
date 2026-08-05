@@ -14,11 +14,14 @@ export const TENOR_HOST_MARKERS = [
 /**
  * Klipy media / CDN host candidates (Discord & partners may use any of these).
  * Host-swap fallbacks for dead Tenor URLs try these with the same path.
+ * Prefer hosts that currently resolve publicly (static / api); keep others as
+ * future-proof candidates for when Discord ships more CDN names.
  */
 export const KLIPY_MEDIA_HOSTS = [
+    "static.klipy.com",
+    "api.klipy.com",
     "media.klipy.com",
     "cdn.klipy.com",
-    "static.klipy.com",
     "gifs.klipy.com",
     "i.klipy.com",
     "media1.klipy.com",
