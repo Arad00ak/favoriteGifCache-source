@@ -6,11 +6,11 @@ Equicord / Vencord userplugin. Keeps your Discord GIF picker favorites on your m
 
 Don't clone this repo into `userplugins`. Use the install package:
 
-https://github.com/Arad00ak/FavoriteGifCache-userplugin
+https://github.com/Arad00ak/favoriteGifCache
 
 ```bash
 cd src/userplugins
-git clone https://github.com/Arad00ak/FavoriteGifCache-userplugin favoriteGifCache
+git clone https://github.com/Arad00ak/favoriteGifCache favoriteGifCache
 ```
 
 Then rebuild, restart Discord, and turn the plugin on.

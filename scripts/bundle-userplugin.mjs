@@ -5,7 +5,7 @@ import { fileURLToPath } from "url";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(__dirname, "..");
 const pluginDir = path.join(root, "plugin");
-const destDir = path.resolve(root, "..", "FavoriteGifCache-userplugin");
+const destDir = path.resolve(root, "..", "favoriteGifCache");
 
 const order = [
     "cacheCore.ts",
@@ -56,7 +56,7 @@ parts.push(`/*
  * Copyright (c) 2026 Arad and contributors
  * SPDX-License-Identifier: GPL-3.0-or-later
  *
- * Single-file install. Source: https://github.com/Arad00ak/FavoriteGifCache
+ * Single-file install. Source: https://github.com/Arad00ak/favoriteGifCache-source
  */
 
 import * as DataStore from "@api/DataStore";
