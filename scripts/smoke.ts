@@ -25,7 +25,7 @@ async function main() {
         now: () => ++t,
     });
 
-    const payload = bytes("s"); // 1 byte
+    const payload = bytes("s");
     if (!(await cache.put("https://media.tenor.com/smoke.gif", payload, "image/gif")).stored) {
         fail("put should store");
     }
@@ -34,9 +34,9 @@ async function main() {
     for (let i = 0; i < payload.length; i++) {
         if (hit.data[i] !== payload[i]) fail("byte mismatch");
     }
-    console.log("put→get ok, useCount=", hit.useCount);
+    console.log("put->get ok, useCount=", hit.useCount);
 
-    // full cache should refuse a third entry without allowEvict
+
     await cache.put("keep-hot", bytes("h"));
     await cache.get("keep-hot");
     const blocked = await cache.put("incoming", bytes("n"));
@@ -46,13 +46,13 @@ async function main() {
     }
     console.log("no thrash when full ok");
 
-    // restart simulation
+
     const again = createFavoriteGifCache({ maxBytes: 2, backend });
     await again.init();
     if (!(await again.peek("keep-hot"))) fail("disk data missing after re-init");
     console.log("persist across re-init ok");
 
-    // allowEvict path still works when we intentionally reclaim
+
     const ev = await again.put("forced", bytes("F"), "image/gif", { allowEvict: true });
     if (!ev.stored) fail("allowEvict put should store");
     if (again.bytes() > 2) fail("over cap after allowEvict");

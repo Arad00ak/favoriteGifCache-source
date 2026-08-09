@@ -12,7 +12,7 @@ export interface FavoriteGifRef {
     width?: number;
     height?: number;
     format?: number;
-    /** Discord favorite order — higher usually means newer / more recent. */
+    
     order?: number;
 }
 
@@ -24,12 +24,12 @@ function getWebpackFind(): WebpackFind | null {
             ?? (globalThis as any).Equicord?.Webpack?.find;
         if (typeof w === "function") return w;
     } catch {
-        // ignore
+
     }
     return null;
 }
 
-/** Pull favorite gif urls from Discord's frecency settings blob. */
+
 export function getFavoriteGifRefsFromFrecency(): FavoriteGifRef[] {
     try {
         const find = getWebpackFind();
@@ -65,26 +65,23 @@ export function getFavoriteGifRefsFromFrecency(): FavoriteGifRef[] {
     }
 }
 
-/** Newest first (higher `order` first). Missing order sorts last. */
+
 export function sortFavoritesNewestFirst(refs: FavoriteGifRef[]): FavoriteGifRef[] {
     return [...refs].sort((a, b) => {
         const ao = typeof a.order === "number" ? a.order : Number.NEGATIVE_INFINITY;
         const bo = typeof b.order === "number" ? b.order : Number.NEGATIVE_INFINITY;
         if (bo !== ao) return bo - ao;
-        // stable-ish fallback: url string so sort is deterministic
+
         const au = a.src || a.url || "";
         const bu = b.src || b.url || "";
         return bu < au ? -1 : bu > au ? 1 : 0;
     });
 }
 
-/** How many newest favorites to mint blob URLs for after prefetch (not the whole 1/3 fill). */
+
 export const PREFETCH_WARM_NEWEST = 16;
 
-/**
- * Startup prefetch byte budget: 1/3 of max cache size (e.g. 500 MB → ~167 MB).
- * Bytes go to disk; soft RAM budget keeps the renderer heap safe.
- */
+
 export function prefetchTargetBytes(maxBytes: number): number {
     if (!Number.isFinite(maxBytes) || maxBytes <= 0) return 0;
     return Math.max(1, Math.floor(maxBytes / 3));
@@ -126,10 +123,7 @@ export function isLikelyGifMediaUrl(url: string) {
     }
 }
 
-/**
- * URL looks like an explicit video file.
- * Small Tenor/Klipy mp4 "gifs" may still be cached if under the per-file size cap in media.ts.
- */
+
 export function isHeavyVideoUrl(url: string) {
     if (!url || typeof url !== "string") return false;
     if (url.startsWith("blob:") || url.startsWith("data:")) return false;
@@ -147,7 +141,7 @@ export function isHeavyVideoMime(mime: string | null | undefined) {
     return m.startsWith("video/") || m === "application/mp4";
 }
 
-/** URL is a candidate for the favorite cache (size limits applied at download time). */
+
 export function isCacheableFavoriteUrl(url: string) {
     return isLikelyGifMediaUrl(url);
 }

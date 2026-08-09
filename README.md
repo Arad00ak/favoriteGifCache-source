@@ -31,7 +31,7 @@ So the first view can still hit the network. After that, hits should be local an
 
 ### On startup (if prefetch is on)
 
-It walks your favorites from newest to older and downloads until the cache hits about **1/3** of max size (default 500 MB → ~167 MB). It does not fill the whole cache on boot on purpose.
+It walks your favorites from newest to older and downloads until the cache hits about **1/3** of max size (default 500 MB -> ~167 MB). It does not fill the whole cache on boot on purpose.
 
 ### When you're using the picker
 
@@ -48,7 +48,7 @@ It walks your favorites from newest to older and downloads until the cache hits 
 
 Without native helpers, it still falls back to IndexedDB + normal fetch.
 
-### Tenor → Klipy
+### Tenor -> Klipy
 
 Favorites still pointing at Tenor media hosts are tried first. If the download fails (Tenor going away), the plugin retries the **same path** on Klipy CDN hosts (`media.klipy.com`, etc.) and stores under the original favorite key so the picker still resolves. New Discord favorites that already use Klipy URLs are cached the same way as Tenor/Giphy.
 

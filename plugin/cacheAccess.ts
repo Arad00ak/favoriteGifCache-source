@@ -6,7 +6,6 @@
 
 import type { FavoriteGifCache } from "./gifCache";
 
-/** Live cache handle for settings UI + plugin code. */
 let active: FavoriteGifCache | null = null;
 let rebuild: (() => Promise<FavoriteGifCache>) | null = null;
 

@@ -11,8 +11,10 @@ const order = [
     "cacheCore.ts",
     "storage.ts",
     "hosts.ts",
+    "sniffMime.ts",
     "gifCache.ts",
     "favorites.ts",
+    "displayUrls.ts",
     "denylist.ts",
     "nativeApi.ts",
     "media.ts",
@@ -25,7 +27,7 @@ const order = [
 function stripModule(src, filename) {
     let s = src.replace(/\r\n/g, "\n");
     s = s.replace(/^\/\*[\s\S]*?\*\/\s*/, "");
-    // remove imports
+
     s = s.replace(/^import\s[\s\S]*?from\s["'][^"']+["'];?\s*$/gm, "");
     s = s.replace(/^import\s["'][^"']+["'];?\s*$/gm, "");
     s = s.replace(/^export\s\{[^}]*\}\sfrom\s["'][^"']+["'];?\s*$/gm, "");
@@ -34,7 +36,7 @@ function stripModule(src, filename) {
         s = s.replace(/^export\s+default\s+/gm, "");
     }
     s = s.replace(/^export\s\{[^}]+\};?\s*$/gm, "");
-    // drop re-export type lists (invalid when "export" is stripped)
+
     s = s.replace(/^export\s+type\s*\{[^}]+\};?\s*$/gm, "");
     s = s.replace(/^export\s+(async\s+)?function\b/gm, "$1function");
     s = s.replace(/^export\s+class\b/gm, "class");
@@ -42,17 +44,17 @@ function stripModule(src, filename) {
     s = s.replace(/^export\s+let\b/gm, "let");
     s = s.replace(/^export\s+var\b/gm, "var");
     s = s.replace(/^export\s+enum\b/gm, "enum");
-    // type Foo = ...  (not type { ... })
+
     s = s.replace(/^export\s+type\s+([A-Za-z_])/gm, "type $1");
     s = s.replace(/^export\s+interface\b/gm, "interface");
-    // denylist uses DataStore namespace import — keep usage, import is top-level
+
     s = s.replace(/\n{3,}/g, "\n\n");
     return s.trim() + "\n";
 }
 
 const parts = [];
 parts.push(`/*
- * Vencord / Equicord userplugin — FavoriteGifCache
+ * Vencord / Equicord userplugin - FavoriteGifCache
  * Copyright (c) 2026 Arad and contributors
  * SPDX-License-Identifier: GPL-3.0-or-later
  *
@@ -80,10 +82,10 @@ const outPath = path.join(destDir, "index.tsx");
 const out = parts.join("");
 fs.writeFileSync(outPath, out);
 
-// native.ts is Vencord's separate Node entry (not a plugin module folder)
+
 fs.copyFileSync(path.join(pluginDir, "native.ts"), path.join(destDir, "native.ts"));
 
-// remove leftover multi-file sources from install package if any
+
 for (const name of fs.readdirSync(destDir)) {
     if (["index.tsx", "native.ts", "README.md", "LICENSE", ".git", ".gitignore"].includes(name)) continue;
     const p = path.join(destDir, name);

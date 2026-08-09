@@ -8,7 +8,7 @@ import type { PluginNative } from "@utils/types";
 
 type Native = PluginNative<typeof import("./native")>;
 
-/** Plugin helpers are keyed by definePlugin name and sometimes folder name. */
+
 export function getPluginNative(): Native | null {
     try {
         const helpers =
@@ -19,7 +19,7 @@ export function getPluginNative(): Native | null {
 
         if (!helpers || typeof helpers !== "object") return null;
 
-        // Keyed by definePlugin({ name }) — see other plugins (OpenInApp, FileUpload, …)
+
         const n =
             helpers.FavoriteGifCache
             ?? helpers.favoriteGifCache

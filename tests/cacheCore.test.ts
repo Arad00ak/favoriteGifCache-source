@@ -40,7 +40,7 @@ describe("GifCacheCore", () => {
     });
 
     it("does not evict when full unless allowEvict is set", () => {
-        // two 1-byte payloads fill a 2-byte budget
+
         const c = new GifCacheCore({ maxBytes: 2, now: () => 1 });
         assert.equal(c.put("a", bytes("A")).stored, true);
         assert.equal(c.put("b", bytes("B")).stored, true);
@@ -102,7 +102,7 @@ describe("GifCacheCore", () => {
         assert.deepEqual([...c.get("x")!.data], [...bytes("two-two")]);
     });
 
-    it("no entry count cap — only byte budget matters", () => {
+    it("no entry count cap - only byte budget matters", () => {
         const c = new GifCacheCore({ maxBytes: 100 });
         for (let i = 0; i < 50; i++) {
             assert.equal(c.put(`k${i}`, bytes("X")).stored, true);
@@ -115,10 +115,10 @@ describe("GifCacheCore", () => {
         const c = new GifCacheCore({ maxBytes: 1000, softMemoryBytes: 10, now: () => 1 });
         assert.equal(c.put("a", new Uint8Array(6).fill(1)).stored, true);
         assert.equal(c.put("b", new Uint8Array(6).fill(2)).stored, true);
-        // both cataloged
+
         assert.equal(c.size(), 2);
         assert.equal(c.bytes(), 12);
-        // one payload dropped to stay under soft RAM
+
         assert.ok(c.residentBytes() <= 10);
         assert.equal(c.has("a"), true);
         assert.equal(c.has("b"), true);

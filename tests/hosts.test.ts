@@ -10,7 +10,7 @@ import {
 } from "../plugin/hosts.ts";
 import { isLikelyGifMediaUrl, cacheKeyForUrl } from "../plugin/favorites.ts";
 
-describe("Tenor → Klipy fallback hosts", () => {
+describe("Tenor -> Klipy fallback hosts", () => {
     it("detects tenor and klipy urls", () => {
         assert.equal(isTenorUrl("https://media.tenor.com/abc/name.gif"), true);
         assert.equal(isKlipyUrl("https://media.klipy.com/abc/name.gif"), true);
@@ -27,7 +27,7 @@ describe("Tenor → Klipy fallback hosts", () => {
         const fallbacks = tenorToKlipyFallbackUrls("https://media.tenor.com/XxYyZz/cool.gif?x=1");
         assert.ok(fallbacks.length > 0);
         assert.ok(fallbacks.every(u => u.includes("klipy.com")));
-        // Prefer hosts that resolve today first
+
         assert.ok(fallbacks[0]!.startsWith("https://static.klipy.com/XxYyZz/cool.gif"));
         assert.ok(fallbacks.every(u => u.includes("x=1")));
     });

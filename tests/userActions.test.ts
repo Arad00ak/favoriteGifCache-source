@@ -41,7 +41,7 @@ describe("user actions vs scroll fill", () => {
 
     it("new favorite / send (cacheOnUserAction) evicts least-used when full", async () => {
         let t = 0;
-        // IDLE(4)+HOT(3)=7 fills budget; NEW(3) needs to evict IDLE
+
         const cache = createFavoriteGifCache({
             maxBytes: 7,
             backend: new MemoryStorageBackend(),
@@ -90,7 +90,7 @@ describe("user actions vs scroll fill", () => {
 
     it("send path works after a scroll miss left the entry unstored", async () => {
         let t = 0;
-        // KEEP(4) fills 5-byte budget for second 5-byte body without eviction
+
         const cache = createFavoriteGifCache({
             maxBytes: 5,
             backend: new MemoryStorageBackend(),
@@ -98,7 +98,7 @@ describe("user actions vs scroll fill", () => {
         });
         await cache.put("https://media.tenor.com/keep-until-send.gif", bytes("KEEP"));
 
-        // scroll-style miss: download but no room
+
         const scroll = await ensureCached(cache, "https://media.tenor.com/later-send.gif", {
             fetchImpl: fakeFetch("LATER"),
             allowEvict: false,
@@ -106,7 +106,7 @@ describe("user actions vs scroll fill", () => {
         assert.equal(scroll!.stored, false);
         assert.equal(cache.has("https://media.tenor.com/later-send.gif"), false);
 
-        // user actually sends it → force store + evict
+
         const sent = await cacheOnUserAction(
             cache,
             "https://media.tenor.com/later-send.gif",

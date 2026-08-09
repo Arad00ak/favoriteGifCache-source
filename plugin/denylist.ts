@@ -40,13 +40,11 @@ export function isAutoCacheDenied(url: string) {
     return false;
 }
 
-/** Block auto/prefetch/scroll caching until user manually caches again. */
 export async function denyAutoCache(url: string) {
     for (const k of keysFor(url)) denied.add(k);
     await persist();
 }
 
-/** Allow auto-cache again (and used when user clicks Cache GIF). */
 export async function allowAutoCache(url: string) {
     for (const k of keysFor(url)) denied.delete(k);
     await persist();

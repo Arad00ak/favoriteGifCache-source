@@ -31,7 +31,7 @@ function showToast(message: string, type: any) {
             id: Toasts.genId(),
         });
     } catch {
-        // ignore
+
     }
 }
 
@@ -151,7 +151,7 @@ export function CacheUsageBar() {
     const onBrowse = async () => {
         const native = getPluginNative();
         if (!native?.pickCacheDirectory) {
-            showToast("Folder picker unavailable — restart Discord after updating", Toasts.Type.FAILURE);
+            showToast("Folder picker unavailable - restart Discord after updating", Toasts.Type.FAILURE);
             return;
         }
         setBusy(true);
@@ -234,7 +234,7 @@ export function CacheUsageBar() {
                 wordBreak: "break-all",
             }}>
                 <span style={{ fontWeight: 600, color: "var(--header-secondary)" }}>Location: </span>
-                {pathLabel || "—"}
+                {pathLabel || "-"}
             </div>
 
             <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
