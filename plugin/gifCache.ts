@@ -15,6 +15,7 @@ import {
     type PutResult,
 } from "./cacheCore";
 import { mediaLookupKeys } from "./hosts";
+import { sniffMime } from "./sniffMime";
 import {
     createDefaultBackend,
     MemoryStorageBackend,
@@ -27,15 +28,12 @@ export { MemoryStorageBackend };
 
 export interface FavoriteGifCacheOptions extends CacheCoreOptions {
     backend?: StorageBackend;
-    /**
-     * When false, put(..., { allowEvict: true }) will not drop old entries.
-     * New items are refused if the cache is full.
-     */
+    
     smartEviction?: boolean;
 }
 
 export interface BlobUrlOptions {
-    /** Bump use stats (default true on display, false when just warming). */
+    
     bumpUsage?: boolean;
 }
 
@@ -75,14 +73,13 @@ export class FavoriteGifCache {
             this.ready = (async () => {
                 await this.backend.open();
                 const all = await this.backend.getAll();
-                // Load one-by-one and soft-unload as we go so a 167–500 MB catalog
-                // never spikes the whole thing into the renderer heap at once.
+
                 for (const entry of all) {
                     this.core.loadEntry(entry);
                     for (const key of this.core.ensureSoftMemory()) this.revokeBlob(key);
                 }
 
-                // only trim if the user lowered the size setting since last run
+
                 const before = new Set(this.core.keys());
                 const removed = this.core.setMaxBytes(this.core.getMaxBytes());
                 const gone = removed.length
@@ -98,10 +95,7 @@ export class FavoriteGifCache {
         await this.ready;
     }
 
-    /**
-     * Ensure payload bytes are in RAM (reload from disk if soft-unloaded).
-     * Returns false if missing entirely.
-     */
+    
     async hydrate(key: string): Promise<boolean> {
         await this.init();
         if (!this.core.has(key)) return false;
@@ -131,9 +125,14 @@ export class FavoriteGifCache {
         }
     }
 
-    /** Tell the cache which keys are still Discord favorites (eviction avoids these). */
+    
     setProtectedKeys(keys: Iterable<string>) {
         this.core.setProtectedKeys(keys);
+    }
+
+    
+    setDisplayPinnedKeys(keys: Iterable<string>) {
+        this.core.setDisplayPinnedKeys(keys);
     }
 
     size() {
@@ -165,7 +164,7 @@ export class FavoriteGifCache {
         if (this.core.needsHydrate(key)) await this.hydrate(key);
         const entry = this.core.get(key);
         if (!entry || entry.data.byteLength === 0) return null;
-        // only rewrite disk when we have real payload (use stats)
+
         await this.backend.put(entry);
         return entry;
     }
@@ -191,10 +190,7 @@ export class FavoriteGifCache {
         return true;
     }
 
-    /**
-     * Write media. By default will not kick anything out if full (scroll-safe).
-     * Pass allowEvict: true only when intentionally reclaiming space.
-     */
+    
     async put(
         key: string,
         data: Uint8Array,
@@ -217,8 +213,10 @@ export class FavoriteGifCache {
                 this.revokeBlob(key);
                 this.ensureBlobUrlSync(key, { bumpUsage: false });
             }
-            // Soft unload may have dropped other payloads — drop their blob URLs too
+
+            const pinned = new Set(this.core.getDisplayPinnedKeys());
             for (const k of [...this.blobUrls.keys()]) {
+                if (pinned.has(k)) continue;
                 if (!this.core.hasResidentData(k)) this.revokeBlob(k);
             }
         }
@@ -236,10 +234,7 @@ export class FavoriteGifCache {
         return ok;
     }
 
-    /**
-     * Drop keys that are no longer favorites. Frees slots without thrashing still-favorited media.
-     * Does not wipe the whole cache.
-     */
+    
     async pruneNotIn(keepKeys: Iterable<string>) {
         await this.init();
         const keep = new Set(keepKeys);
@@ -275,7 +270,7 @@ export class FavoriteGifCache {
             return existing;
         }
 
-        // Payload soft-unloaded — caller should hydrate async; do not mint empty blobs
+
         if (this.core.needsHydrate(key)) return null;
 
         const entry = bump ? this.core.get(key) : this.core.peek(key);
@@ -283,17 +278,25 @@ export class FavoriteGifCache {
         if (bump) this.scheduleMetaPersist(entry);
 
         try {
+
             const copy = entry.data.slice();
-            const blob = new Blob([copy], { type: entry.mimeType || "image/gif" });
+            const ab = copy.buffer.slice(copy.byteOffset, copy.byteOffset + copy.byteLength);
+            const mime = sniffMime(copy, entry.mimeType || "application/octet-stream");
+            const blob = new Blob([ab], { type: mime || "application/octet-stream" });
+            if (blob.size <= 0) return null;
             const url = URL.createObjectURL(blob);
             this.blobUrls.set(key, url);
+
+            if (mime && mime !== entry.mimeType) {
+                entry.mimeType = mime;
+            }
             return url;
         } catch {
             return null;
         }
     }
 
-    /** Hydrate from disk if needed, then create blob URL. */
+    
     async ensureBlobUrl(key: string, opts: BlobUrlOptions = {}): Promise<string | null> {
         await this.init();
         if (this.core.needsHydrate(key)) {
@@ -303,33 +306,40 @@ export class FavoriteGifCache {
     }
 
     resolveDisplayUrlSync(remoteUrl: string): string | null {
+        const hit = this.resolveDisplayHitSync(remoteUrl);
+        return hit?.blobUrl ?? null;
+    }
+
+    
+    resolveDisplayHitSync(remoteUrl: string, opts: BlobUrlOptions = {}): { blobUrl: string; mimeType?: string; key: string; } | null {
         if (!remoteUrl || remoteUrl.startsWith("blob:") || remoteUrl.startsWith("data:")) {
-            return remoteUrl || null;
+            return null;
         }
 
-        // Tenor + Klipy rewrites so a favorite still shows if stored under either host
+        const bump = opts.bumpUsage !== false;
         const candidates = mediaLookupKeys(remoteUrl);
 
         for (const key of candidates) {
             const hot = this.blobUrls.get(key);
             if (hot) {
-                this.touchSync(key);
-                return hot;
+                if (bump) this.touchSync(key);
+                const meta = this.core.getMeta(key);
+                return { blobUrl: hot, mimeType: meta?.mimeType, key };
             }
         }
 
         for (const key of candidates) {
-            const created = this.ensureBlobUrlSync(key, { bumpUsage: true });
-            if (created) return created;
+            const created = this.ensureBlobUrlSync(key, { bumpUsage: bump });
+            if (created) {
+                const meta = this.core.getMeta(key);
+                return { blobUrl: created, mimeType: meta?.mimeType, key };
+            }
         }
 
         return null;
     }
 
-    /**
-     * Create blob URLs for keys that already have resident data.
-     * Does not hydrate the entire cache (that would OOM). Pass only the visible set.
-     */
+    
     warmAllBlobUrls(keys?: string[]) {
         const list = keys ?? this.core.keys();
         let n = 0;
@@ -348,8 +358,17 @@ export class FavoriteGifCache {
         return this.blobUrls.get(key);
     }
 
+    
+    isLiveBlobUrl(blobUrl: string) {
+        if (!blobUrl || !blobUrl.startsWith("blob:")) return false;
+        for (const u of this.blobUrls.values()) {
+            if (u === blobUrl) return true;
+        }
+        return false;
+    }
+
     private scheduleMetaPersist(entry: CacheEntry) {
-        // Never persist a soft-unloaded shell (empty data) over the real disk bytes
+
         if (entry.data.byteLength === 0 && entry.size > 0) return;
 
         const prev = this.metaPersistQueue.get(entry.key);
@@ -370,7 +389,7 @@ export class FavoriteGifCache {
             try {
                 URL.revokeObjectURL(url);
             } catch {
-                // ignore
+
             }
         }
         this.blobUrls.delete(key);

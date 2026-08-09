@@ -18,7 +18,7 @@ describe("display path", () => {
         assert.equal(second.getCachedBlobUrl("https://media.tenor.com/cold.gif"), undefined);
 
         await second.init();
-        // no full warm on init (OOM guard) — hydrate when display needs it
+
         assert.equal(second.getCachedBlobUrl("https://media.tenor.com/cold.gif"), undefined);
         const hot = await second.ensureBlobUrl("https://media.tenor.com/cold.gif", { bumpUsage: false });
         assert.ok(hot?.startsWith("blob:"));
@@ -60,7 +60,7 @@ describe("display path", () => {
 
     it("prefetch fill stops at capacity without deleting old entries", async () => {
         const backend = new MemoryStorageBackend();
-        // room for one 4-byte body only
+
         const cache = createFavoriteGifCache({ maxBytes: 4, backend });
         await cache.init();
 

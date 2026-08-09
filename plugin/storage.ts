@@ -18,7 +18,6 @@ export interface StorageBackend {
     deleteMany(keys: string[]): Promise<void>;
 }
 
-// Stable name so closing Discord does not wipe the DB
 const DB_NAME = "FavoriteGifCache";
 const DB_VERSION = 1;
 const STORE = "gifs";
@@ -46,7 +45,6 @@ function toEntry(raw: any): CacheEntry {
     };
 }
 
-/** In-memory backend for tests / environments without IDB. */
 export class MemoryStorageBackend implements StorageBackend {
     readonly name = "memory";
     private map = new Map<string, CacheEntry>();
@@ -84,10 +82,6 @@ export class MemoryStorageBackend implements StorageBackend {
     }
 }
 
-/**
- * IndexedDB store. Lives in the Discord profile, survives restarts.
- * Plugin disable only drops the in-memory layer; this stays put.
- */
 export class IndexedDBStorageBackend implements StorageBackend {
     readonly name = "indexeddb";
     private db: IDBDatabase | null = null;
@@ -190,10 +184,6 @@ export class IndexedDBStorageBackend implements StorageBackend {
     }
 }
 
-/**
- * Folder on disk via plugin native.ts (desktop only).
- * Each entry is a blob file + meta.json row.
- */
 export class FileStorageBackend implements StorageBackend {
     readonly name = "filesystem";
     constructor(

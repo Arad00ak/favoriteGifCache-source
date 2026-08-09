@@ -4,25 +4,12 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
-/**
- * GIF CDN host helpers.
- * Tenor (media CDN) is sunsetting third-party use; Discord and others move to Klipy.
- * We treat both as first-class and rewrite failed Tenor downloads to Klipy host candidates.
- */
-
-/** Hosts / suffixes that count as Tenor media. */
 export const TENOR_HOST_MARKERS = [
     "media.tenor.com",
     "c.tenor.com",
     "tenor.com",
 ] as const;
 
-/**
- * Klipy media / CDN host candidates (Discord & partners may use any of these).
- * Host-swap fallbacks for dead Tenor URLs try these with the same path.
- * Prefer hosts that currently resolve publicly (static / api); keep others as
- * future-proof candidates for when Discord ships more CDN names.
- */
 export const KLIPY_MEDIA_HOSTS = [
     "static.klipy.com",
     "api.klipy.com",
@@ -68,7 +55,6 @@ export function isKlipyUrl(url: string): boolean {
     return !!h && isKlipyHost(h);
 }
 
-/** Shared GIF provider hosts (Tenor, Klipy, Giphy, Discord CDN). */
 export function isGifProviderHost(hostname: string): boolean {
     const h = hostname.toLowerCase();
     if (isTenorHost(h) || isKlipyHost(h)) return true;
@@ -85,10 +71,6 @@ export function isGifProviderHost(hostname: string): boolean {
     return false;
 }
 
-/**
- * When a Tenor media URL fails (CDN dead / blocked), try same path on Klipy hosts.
- * Path + query preserved. Original URL is NOT included (caller already tried it).
- */
 export function tenorToKlipyFallbackUrls(url: string): string[] {
     if (!isTenorUrl(url)) return [];
     let parsed: URL;
@@ -104,23 +86,19 @@ export function tenorToKlipyFallbackUrls(url: string): string[] {
         try {
             const u = new URL(parsed.href);
             u.hostname = host;
-            // keep https
+
             u.protocol = "https:";
             const href = u.href;
             if (seen.has(href)) continue;
             seen.add(href);
             out.push(href);
         } catch {
-            // skip bad host
+
         }
     }
     return out;
 }
 
-/**
- * Download / resolve candidate list: original first, then Klipy fallbacks for Tenor.
- * Deduped. Non-Tenor URLs return just the original.
- */
 export function mediaDownloadCandidates(url: string): string[] {
     if (!url) return [];
     const out = [url];
@@ -133,10 +111,6 @@ export function mediaDownloadCandidates(url: string): string[] {
     return out;
 }
 
-/**
- * Cache lookup keys: original + host-normalized origin/path + Klipy rewrites of Tenor.
- * Lets a blob stored under a Klipy fallback still hit when Discord shows a Tenor favorite URL.
- */
 export function mediaLookupKeys(url: string): string[] {
     if (!url) return [];
     const keys: string[] = [];
@@ -155,7 +129,7 @@ export function mediaLookupKeys(url: string): string[] {
         }
         add(u.href);
     } catch {
-        // keep raw
+
     }
 
     for (const alt of tenorToKlipyFallbackUrls(url)) {
@@ -164,7 +138,7 @@ export function mediaLookupKeys(url: string): string[] {
             const u = new URL(alt);
             add(`${u.origin}${u.pathname}`);
         } catch {
-            // skip
+
         }
     }
 

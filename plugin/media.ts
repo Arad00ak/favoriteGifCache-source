@@ -11,13 +11,19 @@ import {
 } from "./favorites";
 import { mediaDownloadCandidates, mediaLookupKeys } from "./hosts";
 import { getPluginNative } from "./nativeApi";
+import { sniffMime } from "./sniffMime";
 
 const inflight = new Map<string, Promise<{ data: Uint8Array; mime: string; } | null>>();
 
-/** Skip single files bigger than this (huge "gif" mp4s). */
+
 export const MAX_ENTRY_BYTES = 12 * 1024 * 1024;
 
-function guessMime(url: string, contentType: string | null) {
+function guessMime(url: string, contentType: string | null, data?: Uint8Array) {
+
+    if (data && data.byteLength >= 4) {
+        const sniffed = sniffMime(data, "");
+        if (sniffed) return sniffed;
+    }
     if (contentType && !contentType.includes("octet-stream")) {
         return contentType.split(";")[0]!.trim();
     }
@@ -31,9 +37,7 @@ function guessMime(url: string, contentType: string | null) {
     return "image/gif";
 }
 
-/**
- * Try a single media URL once (native preferred, then optional renderer fetch).
- */
+
 async function downloadOneUrl(
     url: string,
     fetchImpl: typeof fetch,
@@ -50,15 +54,14 @@ async function downloadOneUrl(
                 if (data.byteLength && data.byteLength <= maxBytes) {
                     return {
                         data,
-                        mime: guessMime(url, res.type || null),
+                        mime: guessMime(url, res.type || null, data),
                     };
                 }
             }
         } catch {
-            // try next strategy / candidate
+
         }
-        // native available but this URL failed — try next candidate (e.g. Klipy fallback)
-        // still allow renderer only when no native at all (below)
+
         return null;
     }
 
@@ -69,19 +72,16 @@ async function downloadOneUrl(
             mode: "cors",
         } as RequestInit);
         if (!res.ok) return null;
-        const mime = guessMime(url, res.headers.get("content-type"));
         const buf = new Uint8Array(await res.arrayBuffer());
         if (!buf.byteLength || buf.byteLength > maxBytes) return null;
+        const mime = guessMime(url, res.headers.get("content-type"), buf);
         return { data: buf, mime };
     } catch {
         return null;
     }
 }
 
-/**
- * Pull bytes for a favorite media URL.
- * Prefers native (main process). On Tenor failure, tries Klipy host-swap candidates.
- */
+
 export async function downloadFavoriteMedia(
     url: string,
     fetchImpl: typeof fetch = fetch,
@@ -98,8 +98,7 @@ export async function downloadFavoriteMedia(
 export async function getCachedBytes(cache: FavoriteGifCache, url: string) {
     await cache.init();
 
-    // peek first so miss path does not thrash metadata writes
-    // also check Klipy rewrites of Tenor so a fallback store still hits
+
     for (const key of mediaLookupKeys(url)) {
         if (!cache.has(key)) continue;
         if (!cache.hasResidentData(key)) {
@@ -119,16 +118,13 @@ export type EnsureCachedOptions = {
     fetchImpl?: typeof fetch;
     allowEvict?: boolean;
     maxBytes?: number;
-    /** Ignore denylist (manual "Cache GIF" action). */
+    
     force?: boolean;
-    /** Called to check auto-cache denylist. */
+    
     isDenied?: (url: string) => boolean;
 };
 
-/**
- * Hit → local bytes.
- * Miss → download once (native preferred), store if under size/cap rules.
- */
+
 export async function ensureCached(
     cache: FavoriteGifCache,
     url: string,
@@ -169,15 +165,15 @@ export async function ensureCached(
     const downloaded = await pending;
     if (!downloaded) return null;
 
-    // Skip only truly huge videos; normal Tenor/Klipy "gif" mp4s under the cap are OK
+
     if (downloaded.data.byteLength > maxBytes) {
         return null;
     }
 
-    // Always store under the original favorite key so Discord's Tenor URL still resolves
+
     await cache.put(key, downloaded.data, downloaded.mime, { allowEvict });
 
-    // Also index under the successful Klipy (or other) URL when fallback was used
+
     const fromKey = downloaded.fromUrl ? cacheKeyForUrl(downloaded.fromUrl) : null;
     if (fromKey && fromKey !== key) {
         await cache.put(fromKey, downloaded.data, downloaded.mime, { allowEvict: false });
@@ -215,92 +211,4 @@ export async function cacheOnUserAction(
         isDenied: opts.isDenied,
         maxBytes: opts.maxBytes,
     });
-}
-
-export async function resolveDisplayUrl(
-    cache: FavoriteGifCache,
-    originalUrl: string,
-    opts: { awaitMiss?: boolean; fetchImpl?: typeof fetch; allowEvict?: boolean } = {},
-) {
-    if (!originalUrl || originalUrl.startsWith("blob:") || originalUrl.startsWith("data:")) {
-        return originalUrl;
-    }
-
-    const hot = cache.getCachedBlobUrl(cacheKeyForUrl(originalUrl))
-        ?? cache.getCachedBlobUrl(originalUrl);
-    if (hot) {
-        cache.touchSync(cacheKeyForUrl(originalUrl));
-        return hot;
-    }
-
-    const blob = await cache.getBlobUrl(cacheKeyForUrl(originalUrl));
-    if (blob) return blob;
-    if (originalUrl !== cacheKeyForUrl(originalUrl)) {
-        const blob2 = await cache.getBlobUrl(originalUrl);
-        if (blob2) return blob2;
-    }
-
-    const run = async () => {
-        const ensured = await ensureCached(cache, originalUrl, {
-            fetchImpl: opts.fetchImpl ?? fetch,
-            allowEvict: opts.allowEvict,
-        });
-        if (!ensured) return originalUrl;
-        if (ensured.stored) {
-            const b = await cache.getBlobUrl(ensured.key);
-            return b || originalUrl;
-        }
-        if (typeof Blob !== "undefined" && typeof URL !== "undefined" && URL.createObjectURL) {
-            try {
-                return URL.createObjectURL(new Blob([ensured.data], { type: ensured.mimeType }));
-            } catch {
-                return originalUrl;
-            }
-        }
-        return originalUrl;
-    };
-
-    if (opts.awaitMiss) return run();
-    void run();
-    return originalUrl;
-}
-
-export function installFetchInterceptor(
-    cache: FavoriteGifCache,
-    isFavoriteUrl: (url: string) => boolean,
-) {
-    if (typeof globalThis.fetch !== "function") return () => {};
-
-    const original = globalThis.fetch.bind(globalThis);
-
-    globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
-        try {
-            const url = typeof input === "string"
-                ? input
-                : input instanceof URL
-                    ? input.href
-                    : (input as Request).url;
-
-            if (url && isFavoriteUrl(url)) {
-                const hit = await getCachedBytes(cache, url);
-                if (hit) {
-                    return new Response(hit.data, {
-                        status: 200,
-                        statusText: "OK",
-                        headers: {
-                            "Content-Type": hit.mimeType,
-                            "X-FavoriteGifCache": "HIT",
-                        },
-                    });
-                }
-            }
-        } catch {
-            // fall through
-        }
-        return original(input as any, init);
-    };
-
-    return () => {
-        globalThis.fetch = original;
-    };
 }
