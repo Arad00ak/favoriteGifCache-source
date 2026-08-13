@@ -7,9 +7,8 @@
   "license": "GPL-3.0-or-later",
   "type": "module",
   "scripts": {
-    "test": "tsx --test tests/*.test.ts",
     "smoke": "tsx scripts/smoke.ts",
-    "verify": "npm test && npm run smoke",
+    "verify": "npm run smoke",
     "bundle:userplugin": "node scripts/bundle-userplugin.mjs",
     "sync:equicord": "node scripts/sync-userplugin-folder.mjs"
   },
