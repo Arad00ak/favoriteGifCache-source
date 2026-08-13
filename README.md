@@ -2,9 +2,6 @@
 
 Equicord / Vencord userplugin. Keeps your Discord GIF picker favorites on your machine so they don't have to re-download every time you open the picker.
 
-> [!WARNING]
-> Right after Discord starts, the GIF picker can come up empty or half-loaded the first time you open it. Close it and open it again - that second open is usually fine. Happens while Discord is still finishing startup; not a broken install.
-
 ## Install (users)
 
 Don't clone this repo into `userplugins`. Use the install package:
