@@ -65,6 +65,29 @@ export function getFavoriteGifRefsFromFrecency(): FavoriteGifRef[] {
     }
 }
 
+export function favoriteRefsToPickerItems(refs: FavoriteGifRef[]): any[] {
+    return refs.map(ref => ({
+        url: ref.url || ref.src,
+        src: ref.src || ref.url,
+        width: ref.width,
+        height: ref.height,
+        format: ref.format,
+        order: ref.order,
+    })).filter(g => g.url || g.src);
+}
+
+export async function waitForFavoriteGifRefs(
+    attempts = 12,
+    delayMs = 350,
+): Promise<FavoriteGifRef[]> {
+    for (let i = 0; i < attempts; i++) {
+        const refs = getFavoriteGifRefsFromFrecency();
+        if (refs.length) return refs;
+        await new Promise(r => setTimeout(r, delayMs));
+    }
+    return getFavoriteGifRefsFromFrecency();
+}
+
 
 export function sortFavoritesNewestFirst(refs: FavoriteGifRef[]): FavoriteGifRef[] {
     return [...refs].sort((a, b) => {
