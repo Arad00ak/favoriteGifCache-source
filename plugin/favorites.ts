@@ -4,6 +4,8 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
+import { UserSettingsActionCreators } from "@webpack/common";
+
 import { isGifProviderHost, mediaLookupKeys } from "./hosts";
 
 export interface FavoriteGifRef {
@@ -16,29 +18,36 @@ export interface FavoriteGifRef {
     order?: number;
 }
 
-type WebpackFind = (filter: (m: any) => boolean) => any;
-
-function getWebpackFind(): WebpackFind | null {
+function getFrecencySettings(): any | null {
+    try {
+        const ac = UserSettingsActionCreators?.FrecencyUserSettingsActionCreators;
+        if (ac && typeof ac.getCurrentValue === "function") return ac;
+    } catch {
+    }
     try {
         const w = (globalThis as any).Vencord?.Webpack?.find
             ?? (globalThis as any).Equicord?.Webpack?.find;
-        if (typeof w === "function") return w;
-    } catch {
-
-    }
-    return null;
-}
-
-
-export function getFavoriteGifRefsFromFrecency(): FavoriteGifRef[] {
-    try {
-        const find = getWebpackFind();
-        if (!find) return [];
-
-        const FrecencyUserSettings = find(
+        if (typeof w !== "function") return null;
+        const found = w(
             (m: any) => typeof m?.ProtoClass?.typeName === "string"
                 && m.ProtoClass.typeName.endsWith(".FrecencyUserSettings"),
         );
+        return found?.getCurrentValue ? found : null;
+    } catch {
+        return null;
+    }
+}
+
+export function requestFavoriteGifsLoad() {
+    try {
+        UserSettingsActionCreators?.FrecencyUserSettingsActionCreators?.loadIfNecessary?.();
+    } catch {
+    }
+}
+
+export function getFavoriteGifRefsFromFrecency(): FavoriteGifRef[] {
+    try {
+        const FrecencyUserSettings = getFrecencySettings();
         if (!FrecencyUserSettings?.getCurrentValue) return [];
 
         const value = FrecencyUserSettings.getCurrentValue();
@@ -64,30 +73,6 @@ export function getFavoriteGifRefsFromFrecency(): FavoriteGifRef[] {
         return [];
     }
 }
-
-export function favoriteRefsToPickerItems(refs: FavoriteGifRef[]): any[] {
-    return refs.map(ref => ({
-        url: ref.url || ref.src,
-        src: ref.src || ref.url,
-        width: ref.width,
-        height: ref.height,
-        format: ref.format,
-        order: ref.order,
-    })).filter(g => g.url || g.src);
-}
-
-export async function waitForFavoriteGifRefs(
-    attempts = 12,
-    delayMs = 350,
-): Promise<FavoriteGifRef[]> {
-    for (let i = 0; i < attempts; i++) {
-        const refs = getFavoriteGifRefsFromFrecency();
-        if (refs.length) return refs;
-        await new Promise(r => setTimeout(r, delayMs));
-    }
-    return getFavoriteGifRefsFromFrecency();
-}
-
 
 export function sortFavoritesNewestFirst(refs: FavoriteGifRef[]): FavoriteGifRef[] {
     return [...refs].sort((a, b) => {
