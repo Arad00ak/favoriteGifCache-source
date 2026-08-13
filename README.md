@@ -2,6 +2,9 @@
 
 Equicord / Vencord userplugin. Keeps your Discord GIF picker favorites on your machine so they don't have to re-download every time you open the picker.
 
+> [!WARNING]
+> Right after Discord starts, the GIF picker can come up empty or half-loaded the first time you open it. Close it and open it again - that second open is usually fine. Happens while Discord is still finishing startup; not a broken install.
+
 ## Install (users)
 
 Don't clone this repo into `userplugins`. Use the install package:
@@ -56,7 +59,7 @@ Favorites still pointing at Tenor media hosts are tried first. If the download f
 
 | Repo | Purpose |
 |------|---------|
-| **This one** | Source, tests, bundler |
+| **This one** | Source and bundler |
 | **favoriteGifCache** | What people clone into `userplugins` (`index.tsx` at root) |
 
 Edit files under `plugin/`, then:
@@ -71,7 +74,6 @@ That rebuilds the single-file package in `../favoriteGifCache`.
 
 ```bash
 npm install
-npm test
 npm run smoke
 ```
 

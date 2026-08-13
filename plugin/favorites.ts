@@ -91,7 +91,7 @@ export function cacheKeyForUrl(url: string) {
     if (!url) return url;
     try {
         const u = new URL(url);
-        if (isGifProviderHost(u.hostname) || u.hostname.includes("discord.com")) {
+        if (isGifProviderHost(u.hostname)) {
             return `${u.origin}${u.pathname}`;
         }
         return u.href;
@@ -116,8 +116,8 @@ export function isLikelyGifMediaUrl(url: string) {
     if (url.startsWith("blob:") || url.startsWith("data:")) return false;
     try {
         const u = new URL(url);
-        if (isGifProviderHost(u.hostname)) return true;
-        return /\.(gif|mp4|webm|webp|png|jpe?g)(\?|$)/i.test(u.pathname);
+        if (u.protocol !== "https:" && u.protocol !== "http:") return false;
+        return isGifProviderHost(u.hostname);
     } catch {
         return false;
     }

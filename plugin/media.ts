@@ -9,7 +9,7 @@ import {
     cacheKeyForUrl,
     isLikelyGifMediaUrl,
 } from "./favorites";
-import { mediaDownloadCandidates, mediaLookupKeys } from "./hosts";
+import { hostAllowed, mediaDownloadCandidates, mediaLookupKeys } from "./hosts";
 import { getPluginNative } from "./nativeApi";
 import { sniffMime } from "./sniffMime";
 
@@ -38,11 +38,23 @@ function guessMime(url: string, contentType: string | null, data?: Uint8Array) {
 }
 
 
+function isDownloadableUrl(url: string) {
+    try {
+        const u = new URL(url);
+        if (u.protocol !== "https:" && u.protocol !== "http:") return false;
+        return hostAllowed(u.hostname);
+    } catch {
+        return false;
+    }
+}
+
 async function downloadOneUrl(
     url: string,
     fetchImpl: typeof fetch,
     maxBytes: number,
 ): Promise<{ data: Uint8Array; mime: string; } | null> {
+    if (!isDownloadableUrl(url)) return null;
+
     const native = getPluginNative();
     if (native && typeof (native as any).fetchMedia === "function") {
         try {
@@ -59,9 +71,7 @@ async function downloadOneUrl(
                 }
             }
         } catch {
-
         }
-
         return null;
     }
 
@@ -70,6 +80,7 @@ async function downloadOneUrl(
             credentials: "omit",
             cache: "force-cache",
             mode: "cors",
+            redirect: "error",
         } as RequestInit);
         if (!res.ok) return null;
         const buf = new Uint8Array(await res.arrayBuffer());
