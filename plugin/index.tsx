@@ -16,7 +16,6 @@ import {
     loadDenylist,
 } from "./denylist";
 import {
-    favoriteStableKey,
     GIF_FORMAT_VIDEO,
     healFavoriteUrls,
     isBlobOrDataUrl,
@@ -29,7 +28,6 @@ import {
 } from "./displayUrls";
 import {
     cacheKeyForUrl,
-    favoriteRefsToPickerItems,
     getFavoriteGifRefsFromFrecency,
     isCacheableFavoriteUrl,
     isHeavyVideoUrl,
@@ -37,8 +35,8 @@ import {
     keysForFavorite,
     PREFETCH_WARM_NEWEST,
     prefetchTargetBytes,
+    requestFavoriteGifsLoad,
     sortFavoritesNewestFirst,
-    waitForFavoriteGifRefs,
     type FavoriteGifRef,
 } from "./favorites";
 import {
@@ -64,8 +62,6 @@ let lastPickerInstance: { forceUpdate?: () => void; dead?: boolean } | null = nu
 let wrapAsyncGeneration = 0;
 let forceUpdateTimer: ReturnType<typeof setTimeout> | null = null;
 
-const displayViews = new Map<string, any>();
-let lastGoodFavorites: any[] = [];
 let emptyRetryTimer: ReturnType<typeof setTimeout> | null = null;
 let emptyRetryCount = 0;
 let unsubSettings: (() => void) | null = null;
@@ -209,13 +205,14 @@ function scheduleForceUpdate(instance: any) {
 }
 
 function scheduleEmptyRetry(instance: any) {
-    if (emptyRetryCount >= 8) return;
+    if (emptyRetryCount >= 12) return;
     if (emptyRetryTimer) return;
     emptyRetryTimer = setTimeout(() => {
         emptyRetryTimer = null;
         emptyRetryCount += 1;
+        requestFavoriteGifsLoad();
         safeForceUpdate(instance ?? lastPickerInstance);
-    }, 250 + emptyRetryCount * 200);
+    }, 150 + emptyRetryCount * 150);
 }
 
 function readRemotes(storeGif: any) {
@@ -234,56 +231,32 @@ function readRemotes(storeGif: any) {
 }
 
 
-function getStableDisplayGif(storeGif: any, c: FavoriteGifCache | null): any {
-    if (!storeGif || typeof storeGif !== "object") return storeGif;
+function prepareFavoriteItem(gif: any, c: FavoriteGifCache | null) {
+    if (!gif || typeof gif !== "object") return;
+    healFavoriteUrls(gif);
+    stashOriginalUrls(gif);
 
-    const { src: remoteSrc, url: remoteUrl, format } = readRemotes(storeGif);
-    const key = remoteUrl || remoteSrc;
-    if (!key) {
-        healFavoriteUrls(storeGif);
-        return storeGif;
+    const { src: remoteSrc, url: remoteUrl, format } = readRemotes(gif);
+    if (remoteSrc) gif.__fgcOriginalSrc = remoteSrc;
+    if (remoteUrl) gif.__fgcOriginalUrl = remoteUrl;
+    if (typeof format === "number") {
+        gif.__fgcOriginalFormat = format;
+        gif.format = format;
+    } else if (typeof gif.__fgcOriginalFormat === "number") {
+        gif.format = gif.__fgcOriginalFormat;
     }
 
-    const cdnSrc = remoteSrc || remoteUrl;
-    const cdnUrl = remoteUrl || remoteSrc;
+    const send = gif.__fgcOriginalUrl || remoteUrl;
+    if (send && isRemoteHttpUrl(send)) gif.url = send;
 
-    let view = displayViews.get(key);
-    if (!view) {
-        view = { ...storeGif };
-        view.__fgcOriginalSrc = cdnSrc;
-        view.__fgcOriginalUrl = cdnUrl;
-        if (typeof format === "number") {
-            view.__fgcOriginalFormat = format;
-            view.format = format;
-        }
-        view.src = cdnSrc;
-        view.url = cdnUrl;
-        displayViews.set(key, view);
-    } else {
-        if (cdnSrc) view.__fgcOriginalSrc = cdnSrc;
-        if (cdnUrl) view.__fgcOriginalUrl = cdnUrl;
-        if (typeof format === "number") {
-            view.__fgcOriginalFormat = format;
-            view.format = format;
-        } else if (typeof view.__fgcOriginalFormat === "number") {
-            view.format = view.__fgcOriginalFormat;
-        }
-        if (storeGif.width != null) view.width = storeGif.width;
-        if (storeGif.height != null) view.height = storeGif.height;
-        if (storeGif.order != null) view.order = storeGif.order;
-        view.url = view.__fgcOriginalUrl || cdnUrl;
-    }
-
-
-    const srcNow = view.src;
+    const cdn = gif.__fgcOriginalSrc || gif.__fgcOriginalUrl || remoteSrc || remoteUrl;
+    const srcNow = gif.src;
     if (!srcNow || isBlobOrDataUrl(srcNow)) {
-        const live = c && isBlobOrDataUrl(srcNow) && c.isInitialized() && c.isLiveBlobUrl(srcNow);
-        if (!live) view.src = view.__fgcOriginalSrc || view.__fgcOriginalUrl || cdnSrc;
-    } else if (!isRemoteHttpUrl(srcNow)) {
-        view.src = view.__fgcOriginalSrc || view.__fgcOriginalUrl || cdnSrc;
+        const live = !!(c && isBlobOrDataUrl(srcNow) && c.isInitialized() && c.isLiveBlobUrl(srcNow));
+        if (!live && cdn) gif.src = cdn;
+    } else if (!isRemoteHttpUrl(srcNow) && cdn) {
+        gif.src = cdn;
     }
-
-    return view;
 }
 
 function displayCandidateUrls(view: any): string[] {
@@ -602,42 +575,19 @@ export default definePlugin({
             if (!Array.isArray(favorites)) return favorites;
             if (instance && typeof instance === "object") lastPickerInstance = instance;
 
-            let source = favorites;
-            if (source.length === 0) {
-                const fromStore = favoriteRefsToPickerItems(getFavoriteGifRefsFromFrecency());
-                if (fromStore.length) source = fromStore;
-                else if (lastGoodFavorites.length) source = lastGoodFavorites;
-                else {
-                    scheduleEmptyRetry(instance);
-                    return source;
-                }
-            } else {
-                emptyRetryCount = 0;
+            if (favorites.length === 0) {
+                requestFavoriteGifsLoad();
+                scheduleEmptyRetry(instance);
+                return favorites;
             }
+            emptyRetryCount = 0;
 
             const c = getCache();
-
-            for (const g of source) healFavoriteUrls(g);
-            const view = source.map(g => getStableDisplayGif(g, c.isInitialized() ? c : null));
-
-            if (!view.length) {
-                scheduleEmptyRetry(instance);
-                return lastGoodFavorites.length ? lastGoodFavorites : source;
-            }
-            lastGoodFavorites = view;
-
-
-            const live = new Set<string>();
-            for (const v of view) {
-                const k = v?.__fgcOriginalUrl || v?.__fgcOriginalSrc || favoriteStableKey(v);
-                if (k) live.add(k);
-            }
-            for (const k of [...displayViews.keys()]) {
-                if (!live.has(k)) displayViews.delete(k);
-            }
+            const ready = c.isInitialized() ? c : null;
+            for (const g of favorites) prepareFavoriteItem(g, ready);
 
             const refs: FavoriteGifRef[] = [];
-            for (const g of view) {
+            for (const g of favorites) {
                 const url = g?.__fgcOriginalUrl || remoteSendUrl(g) || "";
                 const src = g?.__fgcOriginalSrc || remoteDisplaySrc(g) || "";
                 if (!url && !src) continue;
@@ -666,9 +616,8 @@ export default definePlugin({
             }
             c.setDisplayPinnedKeys(visibleKeys);
 
-
-            if (c.isInitialized()) {
-                for (const v of view) paintCachedSrc(v, c);
+            if (ready) {
+                for (const g of favorites) paintCachedSrc(g, ready);
             }
 
             const gen = ++wrapAsyncGeneration;
@@ -685,8 +634,8 @@ export default definePlugin({
                     }
 
                     let changed = false;
-                    for (const v of view) {
-                        if (paintCachedSrc(v, c)) changed = true;
+                    for (const g of favorites) {
+                        if (paintCachedSrc(g, c)) changed = true;
                     }
 
                     for (const u of newlyFavorited) {
@@ -695,7 +644,7 @@ export default definePlugin({
                         try {
                             await cacheOnUserAction(c, cacheUrl, fetch, autoCacheOpts());
                             await c.ensureBlobUrl(cacheKeyForUrl(cacheUrl), { bumpUsage: false });
-                        } catch {  }
+                        } catch { }
                         if (gen !== wrapAsyncGeneration) return;
                     }
 
@@ -721,16 +670,15 @@ export default definePlugin({
                         if (gen !== wrapAsyncGeneration) return;
                     }
 
-                    for (const v of view) {
-                        if (paintCachedSrc(v, c)) changed = true;
+                    for (const g of favorites) {
+                        if (paintCachedSrc(g, c)) changed = true;
                     }
                     if (changed) scheduleForceUpdate(instance);
                 } catch {
-
                 }
             })();
 
-            return view;
+            return favorites;
         } catch {
             return favorites;
         }
@@ -755,19 +703,12 @@ export default definePlugin({
             } catch {
             }
 
-            const early = await waitForFavoriteGifRefs(10, 300);
-            if (early.length) {
-                lastGoodFavorites = favoriteRefsToPickerItems(early);
-                refreshFavoriteSet(early);
-            } else {
-                refreshFavoriteSet();
-            }
+            requestFavoriteGifsLoad();
+            refreshFavoriteSet();
 
             const onSettings = () => {
                 const refs = getFavoriteGifRefsFromFrecency();
-                if (!refs.length) return;
-                lastGoodFavorites = favoriteRefsToPickerItems(refs);
-                refreshFavoriteSet(refs);
+                if (refs.length) refreshFavoriteSet(refs);
                 safeForceUpdate(lastPickerInstance);
             };
             try {
@@ -815,9 +756,7 @@ export default definePlugin({
         favoriteUrlSet = new Set();
         favoritesSeeded = false;
         lastPickerInstance = null;
-        lastGoodFavorites = [];
         emptyRetryCount = 0;
-        displayViews.clear();
         wrapAsyncGeneration += 1;
     },
 });
