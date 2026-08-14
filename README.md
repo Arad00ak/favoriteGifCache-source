@@ -71,7 +71,6 @@ That rebuilds the single-file package in `../favoriteGifCache`.
 
 ```bash
 npm install
-npm run smoke
 ```
 
 ## License

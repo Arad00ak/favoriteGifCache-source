@@ -204,19 +204,15 @@ function hookFavoriteUpdates() {
         const orig = ac.updateAsync;
         if (typeof orig !== "function") return;
         (ac as any).__fgcHooked = true;
+        let hookTimer: ReturnType<typeof setTimeout> | null = null;
         ac.updateAsync = function (this: any, key: string, ...rest: any[]) {
             const ret = orig.call(this, key, ...rest);
             if (key === "favoriteGifs") {
-                const after = () => {
+                if (hookTimer) clearTimeout(hookTimer);
+                hookTimer = setTimeout(() => {
+                    hookTimer = null;
                     try { syncFromFrecency(); } catch { }
-                };
-                if (ret && typeof (ret as Promise<unknown>).then === "function") {
-                    (ret as Promise<unknown>).then(after, after);
-                } else {
-                    queueMicrotask(after);
-                }
-                setTimeout(after, 0);
-                setTimeout(after, 300);
+                }, 50);
             }
             return ret;
         };
@@ -272,9 +268,7 @@ function isTrackedFavorite(url: string) {
     return favoriteUrlSet.has(url) || favoriteUrlSet.has(cacheKeyForUrl(url));
 }
 
-function shouldCacheFavoriteUrl(url: string) {
-    return !!url && isLikelyGifMediaUrl(url);
-}
+
 
 
 function newRefsForUrls(urls: string[], refs: FavoriteGifRef[]): FavoriteGifRef[] {
@@ -300,7 +294,7 @@ async function cacheNewFavoriteRefs(refs: FavoriteGifRef[]) {
             const tried = new Set<string>();
             const urls = [pickCacheableUrl(ref), ref.src, ref.url];
             for (const cacheUrl of urls) {
-                if (!cacheUrl || !shouldCacheFavoriteUrl(cacheUrl) || isAutoCacheDenied(cacheUrl)) continue;
+                if (!cacheUrl || !isLikelyGifMediaUrl(cacheUrl) || isAutoCacheDenied(cacheUrl)) continue;
                 const key = cacheKeyForUrl(cacheUrl);
                 if (tried.has(key)) continue;
                 tried.add(key);
@@ -325,15 +319,15 @@ function pickCacheableUrl(ref: { src?: string; url?: string; format?: number; })
     let format = ref.format;
     if (typeof format !== "number" && ref.src && isHeavyVideoUrl(ref.src)) format = GIF_FORMAT_VIDEO;
     if (format === GIF_FORMAT_VIDEO) {
-        const videos = candidates.filter(u => shouldCacheFavoriteUrl(u) && isHeavyVideoUrl(u));
+        const videos = candidates.filter(u => isLikelyGifMediaUrl(u) && isHeavyVideoUrl(u));
         if (videos.length) return videos[0]!;
     }
     if (format === GIF_FORMAT_IMAGE) {
-        const images = candidates.filter(u => shouldCacheFavoriteUrl(u) && !isHeavyVideoUrl(u));
+        const images = candidates.filter(u => isLikelyGifMediaUrl(u) && !isHeavyVideoUrl(u));
         if (images.length) return images[0]!;
     }
     for (const u of candidates) {
-        if (shouldCacheFavoriteUrl(u)) return u;
+        if (isLikelyGifMediaUrl(u)) return u;
     }
     return null;
 }
@@ -412,9 +406,7 @@ function applyCacheSrc(gif: any, c: FavoriteGifCache | null): boolean {
 
     for (const remote of remoteCandidates(gif)) {
         const hit = c.resolveDisplayHitSync(remote, { bumpUsage: false });
-        if (!hit?.blobUrl?.startsWith("blob:")) continue;
-        if (!c.isLiveBlobUrl(hit.blobUrl)) continue;
-        if (!mimeMatchesFormat(format, hit.mimeType)) continue;
+        if (!hit?.blobUrl?.startsWith("blob:") || !mimeMatchesFormat(format, hit.mimeType)) continue;
         if (gif.src === hit.blobUrl) return false;
         gif.src = hit.blobUrl;
         return true;
@@ -498,7 +490,7 @@ function maybeSwapMedia(el: HTMLImageElement | HTMLVideoElement) {
         const c = cache;
         if (!c?.isInitialized()) return;
         const hit = c.resolveDisplayHitSync(src, { bumpUsage: false });
-        if (!hit?.blobUrl?.startsWith("blob:") || !c.isLiveBlobUrl(hit.blobUrl)) return;
+        if (!hit?.blobUrl?.startsWith("blob:")) return;
 
         const videoEl = el.tagName === "VIDEO";
         if (videoEl && !isVideoMime(hit.mimeType)) return;
@@ -517,7 +509,7 @@ function scanPickerMedia() {
     scanTimer = setTimeout(() => {
         scanTimer = null;
         try {
-            for (const node of document.querySelectorAll("img,video")) {
+            for (const node of document.querySelectorAll("img[src^=\"http\"],video[src^=\"http\"]")) {
                 maybeSwapMedia(node as HTMLImageElement | HTMLVideoElement);
             }
         } catch {
@@ -607,7 +599,7 @@ async function runWrapWork(job: {
     for (const ref of job.refs) {
         if (downloads >= 10) break;
         for (const u of [ref.src, ref.url]) {
-            if (!u || isAutoCacheDenied(u) || !shouldCacheFavoriteUrl(u)) continue;
+            if (!u || isAutoCacheDenied(u) || !isLikelyGifMediaUrl(u)) continue;
             const key = cacheKeyForUrl(u);
             if (!c.has(key) && !c.has(u) && downloads < 10) {
                 await ensureCached(c, u, { allowEvict: false, ...autoCacheOpts() });
@@ -966,7 +958,7 @@ export default definePlugin({
             if (favoritePoll) clearInterval(favoritePoll);
             favoritePoll = setInterval(() => {
                 try { syncFromFrecency(); } catch { }
-            }, 2000);
+            }, 4000);
 
             const onSettings = () => {
                 syncFromFrecency();
@@ -1029,9 +1021,3 @@ export default definePlugin({
         emptyRetryCount = 0;
     },
 });
-
-export {
-    createFavoriteGifCache,
-    DEFAULT_MAX_BYTES,
-    FavoriteGifCache,
-} from "./gifCache";

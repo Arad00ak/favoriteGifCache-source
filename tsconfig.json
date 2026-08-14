@@ -11,5 +11,5 @@
     "lib": ["ES2022", "DOM"],
     "jsx": "react-jsx"
   },
-  "include": ["plugin/**/*.ts", "plugin/**/*.tsx", "scripts/**/*.ts"]
+  "include": ["plugin/**/*.ts", "plugin/**/*.tsx"]
 }
