@@ -97,7 +97,7 @@ async function downloadOneUrl(
 }
 
 
-export async function downloadFavoriteMedia(
+async function downloadFavoriteMedia(
     url: string,
     fetchImpl: typeof fetch = fetch,
     maxBytes = MAX_ENTRY_BYTES,
@@ -110,7 +110,7 @@ export async function downloadFavoriteMedia(
     return null;
 }
 
-export async function getCachedBytes(cache: FavoriteGifCache, url: string) {
+async function getCachedBytes(cache: FavoriteGifCache, url: string) {
     await cache.init();
 
 

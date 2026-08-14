@@ -4,13 +4,7 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
-export const TENOR_HOSTS = [
-    "media.tenor.com",
-    "c.tenor.com",
-    "tenor.com",
-] as const;
-
-export const KLIPY_MEDIA_HOSTS = [
+const KLIPY_MEDIA_HOSTS = [
     "static.klipy.com",
     "media.klipy.com",
     "cdn.klipy.com",
@@ -22,7 +16,11 @@ export const KLIPY_MEDIA_HOSTS = [
     "klipy.com",
 ] as const;
 
-export const GIPHY_HOSTS = [
+const ALL_ALLOWED_HOSTS = [
+    "media.tenor.com",
+    "c.tenor.com",
+    "tenor.com",
+    ...KLIPY_MEDIA_HOSTS,
     "media.giphy.com",
     "media0.giphy.com",
     "media1.giphy.com",
@@ -31,32 +29,14 @@ export const GIPHY_HOSTS = [
     "media4.giphy.com",
     "i.giphy.com",
     "giphy.com",
-] as const;
-
-export const DISCORD_MEDIA_HOSTS = [
     "media.discordapp.net",
     "cdn.discordapp.com",
     "images-ext-1.discordapp.net",
     "images-ext-2.discordapp.net",
-] as const;
-
-const ALL_ALLOWED_HOSTS: readonly string[] = [
-    ...TENOR_HOSTS,
-    ...KLIPY_MEDIA_HOSTS,
-    ...GIPHY_HOSTS,
-    ...DISCORD_MEDIA_HOSTS,
     "discord.com",
     "discordapp.com",
     "discordapp.net",
-];
-
-export function hostnameOf(url: string): string | null {
-    try {
-        return new URL(url).hostname.toLowerCase();
-    } catch {
-        return null;
-    }
-}
+] as const;
 
 export function hostAllowed(hostname: string): boolean {
     const h = hostname.toLowerCase().replace(/\.$/, "");
@@ -67,28 +47,13 @@ export function hostAllowed(hostname: string): boolean {
     return false;
 }
 
-export function isTenorHost(hostname: string): boolean {
-    const h = hostname.toLowerCase().replace(/\.$/, "");
-    return h === "tenor.com" || h.endsWith(".tenor.com");
-}
-
-export function isKlipyHost(hostname: string): boolean {
-    const h = hostname.toLowerCase().replace(/\.$/, "");
-    return h === "klipy.com" || h.endsWith(".klipy.com");
-}
-
-export function isTenorUrl(url: string): boolean {
-    const h = hostnameOf(url);
-    return !!h && isTenorHost(h);
-}
-
-export function isKlipyUrl(url: string): boolean {
-    const h = hostnameOf(url);
-    return !!h && isKlipyHost(h);
-}
-
-export function isGifProviderHost(hostname: string): boolean {
-    return hostAllowed(hostname);
+function isTenorUrl(url: string): boolean {
+    try {
+        const h = new URL(url).hostname.toLowerCase().replace(/\.$/, "");
+        return h === "tenor.com" || h.endsWith(".tenor.com");
+    } catch {
+        return false;
+    }
 }
 
 export function tenorToKlipyFallbackUrls(url: string): string[] {
@@ -142,7 +107,7 @@ export function mediaLookupKeys(url: string): string[] {
     add(url);
     try {
         const u = new URL(url);
-        if (isGifProviderHost(u.hostname)) {
+        if (hostAllowed(u.hostname)) {
             add(`${u.origin}${u.pathname}`);
         }
         add(u.href);

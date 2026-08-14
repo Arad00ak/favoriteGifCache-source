@@ -67,25 +67,12 @@ export class GifCacheCore {
         return this.enforceCap();
     }
 
-    getSoftMemoryBytes() {
-        return this.softMemoryBytes;
-    }
-
     setProtectedKeys(keys: Iterable<string>) {
         this.protectedKeys = new Set(keys);
     }
 
-    getProtectedKeys(): string[] {
-        return [...this.protectedKeys];
-    }
-
-    
     setDisplayPinnedKeys(keys: Iterable<string>) {
         this.displayPinnedKeys = new Set(keys);
-    }
-
-    getDisplayPinnedKeys(): string[] {
-        return [...this.displayPinnedKeys];
     }
 
     size() {
@@ -125,10 +112,7 @@ export class GifCacheCore {
     get(key: string): CacheEntry | null {
         const entry = this.entries.get(key);
         if (!entry) return null;
-
-        entry.useCount += 1;
-        entry.lastUsed = this.now();
-
+        this.touch(key);
         return { ...entry, data: entry.data.slice() };
     }
 
@@ -138,15 +122,23 @@ export class GifCacheCore {
         return { ...entry, data: entry.data.slice() };
     }
 
+    peekRef(key: string): CacheEntry | null {
+        return this.entries.get(key) ?? null;
+    }
+
+    touch(key: string) {
+        const entry = this.entries.get(key);
+        if (!entry) return false;
+        entry.useCount += 1;
+        entry.lastUsed = this.now();
+        return true;
+    }
+
     getMeta(key: string): CacheMeta | null {
         const entry = this.entries.get(key);
         if (!entry) return null;
         const { data: _d, ...meta } = entry;
         return { ...meta };
-    }
-
-    listMeta(): CacheMeta[] {
-        return [...this.entries.values()].map(({ data: _d, ...meta }) => ({ ...meta }));
     }
 
     

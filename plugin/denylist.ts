@@ -11,7 +11,6 @@ import { cacheKeyForUrl } from "./favorites";
 const STORE_KEY = "FavoriteGifCache.autoCacheDenylist";
 
 let denied = new Set<string>();
-let loaded = false;
 
 function keysFor(url: string) {
     const k = cacheKeyForUrl(url);
@@ -25,7 +24,6 @@ export async function loadDenylist() {
     } catch {
         denied = new Set();
     }
-    loaded = true;
 }
 
 async function persist() {
@@ -48,12 +46,4 @@ export async function denyAutoCache(url: string) {
 export async function allowAutoCache(url: string) {
     for (const k of keysFor(url)) denied.delete(k);
     await persist();
-}
-
-export function denylistSize() {
-    return denied.size;
-}
-
-export function isDenylistLoaded() {
-    return loaded;
 }
