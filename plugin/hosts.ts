@@ -94,8 +94,13 @@ export function mediaDownloadCandidates(url: string): string[] {
     return out;
 }
 
+const lookupMemo = new Map<string, string[]>();
+
 export function mediaLookupKeys(url: string): string[] {
     if (!url) return [];
+    const hit = lookupMemo.get(url);
+    if (hit) return hit;
+
     const keys: string[] = [];
     const seen = new Set<string>();
     const add = (k: string) => {
@@ -107,21 +112,12 @@ export function mediaLookupKeys(url: string): string[] {
     add(url);
     try {
         const u = new URL(url);
-        if (hostAllowed(u.hostname)) {
-            add(`${u.origin}${u.pathname}`);
-        }
+        if (hostAllowed(u.hostname)) add(`${u.origin}${u.pathname}`);
         add(u.href);
     } catch {
     }
 
-    for (const alt of tenorToKlipyFallbackUrls(url)) {
-        add(alt);
-        try {
-            const u = new URL(alt);
-            add(`${u.origin}${u.pathname}`);
-        } catch {
-        }
-    }
-
+    if (lookupMemo.size > 1500) lookupMemo.clear();
+    lookupMemo.set(url, keys);
     return keys;
 }
