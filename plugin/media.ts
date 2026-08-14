@@ -72,17 +72,21 @@ async function downloadOneUrl(
             }
         } catch {
         }
-        return null;
     }
 
     try {
         const res = await fetchImpl(url, {
             credentials: "omit",
-            cache: "force-cache",
+            cache: "no-store",
             mode: "cors",
             redirect: "error",
         } as RequestInit);
         if (!res.ok) return null;
+        const lenHeader = res.headers.get("content-length");
+        if (lenHeader) {
+            const len = Number(lenHeader);
+            if (Number.isFinite(len) && len > maxBytes) return null;
+        }
         const buf = new Uint8Array(await res.arrayBuffer());
         if (!buf.byteLength || buf.byteLength > maxBytes) return null;
         const mime = guessMime(url, res.headers.get("content-type"), buf);
