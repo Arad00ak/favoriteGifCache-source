@@ -54,15 +54,3 @@ export function sniffMime(data: Uint8Array, fallback = "application/octet-stream
 
     return fallback;
 }
-
-export function isSniffedVideoMime(mime: string | null | undefined) {
-    if (!mime) return false;
-    const m = mime.toLowerCase().split(";")[0]!.trim();
-    return m.startsWith("video/") || m === "application/mp4";
-}
-
-export function isSniffedImageMime(mime: string | null | undefined) {
-    if (!mime) return false;
-    const m = mime.toLowerCase().split(";")[0]!.trim();
-    return m.startsWith("image/");
-}

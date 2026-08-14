@@ -4,13 +4,7 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
-export const TENOR_HOSTS = [
-    "media.tenor.com",
-    "c.tenor.com",
-    "tenor.com",
-] as const;
-
-export const KLIPY_MEDIA_HOSTS = [
+const KLIPY_MEDIA_HOSTS = [
     "static.klipy.com",
     "media.klipy.com",
     "cdn.klipy.com",
@@ -19,10 +13,13 @@ export const KLIPY_MEDIA_HOSTS = [
     "media1.klipy.com",
     "media2.klipy.com",
     "c.klipy.com",
-    "klipy.com",
 ] as const;
 
-export const GIPHY_HOSTS = [
+const ALL_ALLOWED_HOSTS = [
+    "media.tenor.com",
+    "c.tenor.com",
+    "tenor.com",
+    ...KLIPY_MEDIA_HOSTS,
     "media.giphy.com",
     "media0.giphy.com",
     "media1.giphy.com",
@@ -31,32 +28,14 @@ export const GIPHY_HOSTS = [
     "media4.giphy.com",
     "i.giphy.com",
     "giphy.com",
-] as const;
-
-export const DISCORD_MEDIA_HOSTS = [
     "media.discordapp.net",
     "cdn.discordapp.com",
     "images-ext-1.discordapp.net",
     "images-ext-2.discordapp.net",
-] as const;
-
-const ALL_ALLOWED_HOSTS: readonly string[] = [
-    ...TENOR_HOSTS,
-    ...KLIPY_MEDIA_HOSTS,
-    ...GIPHY_HOSTS,
-    ...DISCORD_MEDIA_HOSTS,
     "discord.com",
     "discordapp.com",
     "discordapp.net",
-];
-
-export function hostnameOf(url: string): string | null {
-    try {
-        return new URL(url).hostname.toLowerCase();
-    } catch {
-        return null;
-    }
-}
+] as const;
 
 export function hostAllowed(hostname: string): boolean {
     const h = hostname.toLowerCase().replace(/\.$/, "");
@@ -67,38 +46,39 @@ export function hostAllowed(hostname: string): boolean {
     return false;
 }
 
-export function isTenorHost(hostname: string): boolean {
+function isTenorMediaHost(hostname: string): boolean {
     const h = hostname.toLowerCase().replace(/\.$/, "");
-    return h === "tenor.com" || h.endsWith(".tenor.com");
+    return h === "media.tenor.com" || h === "c.tenor.com" || h.endsWith(".media.tenor.com");
 }
 
-export function isKlipyHost(hostname: string): boolean {
-    const h = hostname.toLowerCase().replace(/\.$/, "");
-    return h === "klipy.com" || h.endsWith(".klipy.com");
-}
-
-export function isTenorUrl(url: string): boolean {
-    const h = hostnameOf(url);
-    return !!h && isTenorHost(h);
-}
-
-export function isKlipyUrl(url: string): boolean {
-    const h = hostnameOf(url);
-    return !!h && isKlipyHost(h);
-}
-
-export function isGifProviderHost(hostname: string): boolean {
-    return hostAllowed(hostname);
+export function isDirectMediaUrl(url: string): boolean {
+    try {
+        const u = new URL(url);
+        if (u.protocol !== "https:" && u.protocol !== "http:") return false;
+        const h = u.hostname.toLowerCase().replace(/\.$/, "");
+        if (!hostAllowed(h)) return false;
+        const path = u.pathname.toLowerCase();
+        if (path.includes("/view/") || path.endsWith(".html")) return false;
+        if (/\.(gif|webp|png|jpe?g|mp4|webm|mov|m4v)$/i.test(path)) return true;
+        if (/\/(mp4|webm|gif|tinygif|nanogif|tinygifmax)(\/|$)/i.test(path)) return true;
+        if (h === "media.tenor.com" || h === "c.tenor.com") return true;
+        if (h.endsWith(".giphy.com") && h !== "giphy.com") return true;
+        if (h.endsWith(".klipy.com") && h !== "klipy.com") return true;
+        return false;
+    } catch {
+        return false;
+    }
 }
 
 export function tenorToKlipyFallbackUrls(url: string): string[] {
-    if (!isTenorUrl(url)) return [];
     let parsed: URL;
     try {
         parsed = new URL(url);
     } catch {
         return [];
     }
+    if (!isTenorMediaHost(parsed.hostname)) return [];
+    if (!isDirectMediaUrl(url)) return [];
 
     const out: string[] = [];
     const seen = new Set<string>();
@@ -107,10 +87,9 @@ export function tenorToKlipyFallbackUrls(url: string): string[] {
             const u = new URL(parsed.href);
             u.hostname = host;
             u.protocol = "https:";
-            const href = u.href;
-            if (seen.has(href)) continue;
-            seen.add(href);
-            out.push(href);
+            if (seen.has(u.href)) continue;
+            seen.add(u.href);
+            out.push(u.href);
         } catch {
         }
     }
@@ -129,8 +108,13 @@ export function mediaDownloadCandidates(url: string): string[] {
     return out;
 }
 
+const lookupMemo = new Map<string, string[]>();
+
 export function mediaLookupKeys(url: string): string[] {
     if (!url) return [];
+    const hit = lookupMemo.get(url);
+    if (hit) return hit;
+
     const keys: string[] = [];
     const seen = new Set<string>();
     const add = (k: string) => {
@@ -142,21 +126,12 @@ export function mediaLookupKeys(url: string): string[] {
     add(url);
     try {
         const u = new URL(url);
-        if (isGifProviderHost(u.hostname)) {
-            add(`${u.origin}${u.pathname}`);
-        }
+        if (hostAllowed(u.hostname)) add(`${u.origin}${u.pathname}`);
         add(u.href);
     } catch {
     }
 
-    for (const alt of tenorToKlipyFallbackUrls(url)) {
-        add(alt);
-        try {
-            const u = new URL(alt);
-            add(`${u.origin}${u.pathname}`);
-        } catch {
-        }
-    }
-
+    if (lookupMemo.size > 1500) lookupMemo.clear();
+    lookupMemo.set(url, keys);
     return keys;
 }

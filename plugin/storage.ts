@@ -190,6 +190,15 @@ export class FileStorageBackend implements StorageBackend {
         private readonly dir: string,
         private readonly api: {
             ensureCacheDir(dir: string): Promise<unknown>;
+            getEntry(dir: string, key: string): Promise<{
+                key: string;
+                data: ArrayBuffer;
+                mimeType: string;
+                useCount: number;
+                lastUsed: number;
+                createdAt: number;
+                size: number;
+            } | null>;
             loadAllEntries(dir: string): Promise<Array<{
                 key: string;
                 data: ArrayBuffer;
@@ -238,6 +247,13 @@ export class FileStorageBackend implements StorageBackend {
     }
 
     async get(key: string) {
+        try {
+            if (typeof this.api.getEntry === "function") {
+                const row = await this.api.getEntry(this.dir, key);
+                return row ? toEntry(row) : null;
+            }
+        } catch {
+        }
         const all = await this.getAll();
         return all.find(e => e.key === key) ?? null;
     }

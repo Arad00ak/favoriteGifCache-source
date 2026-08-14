@@ -9,7 +9,7 @@ import {
     cacheKeyForUrl,
     isLikelyGifMediaUrl,
 } from "./favorites";
-import { hostAllowed, mediaDownloadCandidates, mediaLookupKeys } from "./hosts";
+import { isDirectMediaUrl, mediaDownloadCandidates, mediaLookupKeys } from "./hosts";
 import { getPluginNative } from "./nativeApi";
 import { sniffMime } from "./sniffMime";
 
@@ -38,22 +38,12 @@ function guessMime(url: string, contentType: string | null, data?: Uint8Array) {
 }
 
 
-function isDownloadableUrl(url: string) {
-    try {
-        const u = new URL(url);
-        if (u.protocol !== "https:" && u.protocol !== "http:") return false;
-        return hostAllowed(u.hostname);
-    } catch {
-        return false;
-    }
-}
-
 async function downloadOneUrl(
     url: string,
-    fetchImpl: typeof fetch,
+    _fetchImpl: typeof fetch,
     maxBytes: number,
 ): Promise<{ data: Uint8Array; mime: string; } | null> {
-    if (!isDownloadableUrl(url)) return null;
+    if (!isDirectMediaUrl(url)) return null;
 
     const native = getPluginNative();
     if (native && typeof (native as any).fetchMedia === "function") {
@@ -76,13 +66,18 @@ async function downloadOneUrl(
     }
 
     try {
-        const res = await fetchImpl(url, {
+        const res = await _fetchImpl(url, {
             credentials: "omit",
-            cache: "force-cache",
+            cache: "no-store",
             mode: "cors",
             redirect: "error",
         } as RequestInit);
         if (!res.ok) return null;
+        const lenHeader = res.headers.get("content-length");
+        if (lenHeader) {
+            const len = Number(lenHeader);
+            if (Number.isFinite(len) && len > maxBytes) return null;
+        }
         const buf = new Uint8Array(await res.arrayBuffer());
         if (!buf.byteLength || buf.byteLength > maxBytes) return null;
         const mime = guessMime(url, res.headers.get("content-type"), buf);
@@ -93,7 +88,7 @@ async function downloadOneUrl(
 }
 
 
-export async function downloadFavoriteMedia(
+async function downloadFavoriteMedia(
     url: string,
     fetchImpl: typeof fetch = fetch,
     maxBytes = MAX_ENTRY_BYTES,
@@ -106,7 +101,7 @@ export async function downloadFavoriteMedia(
     return null;
 }
 
-export async function getCachedBytes(cache: FavoriteGifCache, url: string) {
+async function getCachedBytes(cache: FavoriteGifCache, url: string) {
     await cache.init();
 
 
