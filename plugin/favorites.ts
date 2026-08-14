@@ -6,7 +6,7 @@
 
 import { UserSettingsActionCreators } from "@webpack/common";
 
-import { hostAllowed, mediaLookupKeys } from "./hosts";
+import { hostAllowed, isDirectMediaUrl, mediaLookupKeys } from "./hosts";
 
 export interface FavoriteGifRef {
     url: string;
@@ -114,13 +114,7 @@ export function keysForFavorite(ref: FavoriteGifRef) {
 export function isLikelyGifMediaUrl(url: string) {
     if (!url || typeof url !== "string") return false;
     if (url.startsWith("blob:") || url.startsWith("data:")) return false;
-    try {
-        const u = new URL(url);
-        if (u.protocol !== "https:" && u.protocol !== "http:") return false;
-        return hostAllowed(u.hostname);
-    } catch {
-        return false;
-    }
+    return isDirectMediaUrl(url);
 }
 
 
