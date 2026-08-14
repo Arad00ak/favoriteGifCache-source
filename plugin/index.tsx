@@ -235,6 +235,17 @@ function scheduleEmptyRetry(instance: any) {
     }, 150 + emptyRetryCount * 150);
 }
 
+function isPlayableMediaUrl(url: unknown): url is string {
+    if (!isRemoteHttpUrl(url) || !isLikelyGifMediaUrl(url)) return false;
+    try {
+        const path = new URL(url).pathname.toLowerCase();
+        if (path.includes("/view/") || path.endsWith(".html")) return false;
+    } catch {
+        return false;
+    }
+    return true;
+}
+
 function healStoreGif(gif: any, c: FavoriteGifCache | null = null) {
     if (!gif || typeof gif !== "object") return;
     healFavoriteUrls(gif);
@@ -243,7 +254,7 @@ function healStoreGif(gif: any, c: FavoriteGifCache | null = null) {
     if (send && isRemoteHttpUrl(send)) gif.url = send;
     if (isBlobOrDataUrl(gif.src)) {
         if (c?.isLiveBlobUrl(gif.src)) return;
-        const cdn = remoteDisplaySrc(gif) || send;
+        const cdn = [gif.__fgcOriginalSrc, remoteDisplaySrc(gif), send].find(isPlayableMediaUrl);
         if (cdn) gif.src = cdn;
     }
 }
@@ -372,12 +383,6 @@ function maybeSwapMedia(el: HTMLImageElement | HTMLVideoElement) {
         if (el.dataset.fgcSrc === src && el.src === hit.blobUrl) return;
         el.dataset.fgcSrc = src;
         el.src = hit.blobUrl;
-        if (videoEl) {
-            const v = el as HTMLVideoElement;
-            v.muted = true;
-            try { v.load(); } catch { }
-            try { void v.play(); } catch { }
-        }
     } catch {
     }
 }
@@ -546,17 +551,34 @@ async function manualCacheGif(url: string) {
     const c = getCache();
     await c.init();
 
-    const res = await cacheOnUserAction(c, url, fetch, {
-        force: true,
-        maxBytes: Number.MAX_SAFE_INTEGER,
-    });
-    if (res?.stored || c.has(cacheKeyForUrl(url))) {
-        c.ensureBlobUrlSync(cacheKeyForUrl(url), { bumpUsage: true });
-        toast("GIF Cached", Toasts.Type.SUCCESS);
-        scanPickerMedia();
-    } else {
-        toast("Could not cache GIF", Toasts.Type.FAILURE);
+    const tried = new Set<string>();
+    const queue = [url];
+    for (const g of lastFavorites) {
+        const remotes = remoteCandidates(g);
+        if (remotes.some(r => r === url || cacheKeyForUrl(r) === cacheKeyForUrl(url))) {
+            for (const r of remotes) queue.push(r);
+        }
     }
+
+    for (const u of queue) {
+        if (!u || tried.has(u)) continue;
+        tried.add(u);
+        try {
+            const res = await cacheOnUserAction(c, u, fetch, {
+                force: true,
+                maxBytes: Number.MAX_SAFE_INTEGER,
+            });
+            if (res?.stored || c.has(cacheKeyForUrl(u)) || c.has(u)) {
+                c.ensureBlobUrlSync(cacheKeyForUrl(u), { bumpUsage: true });
+                toast("GIF Cached", Toasts.Type.SUCCESS);
+                for (const g of lastFavorites) applyCacheSrc(g, c);
+                scanPickerMedia();
+                return;
+            }
+        } catch {
+        }
+    }
+    toast("Could not cache GIF", Toasts.Type.FAILURE);
 }
 
 async function manualRemoveFromCache(url: string) {
@@ -833,7 +855,6 @@ export default definePlugin({
                 const refs = getFavoriteGifRefsFromFrecency();
                 if (refs.length) refreshFavoriteSet(refs);
                 void warmCachedFavoriteBlobs();
-                safeForceUpdate(lastPickerInstance);
             };
             try {
                 FluxDispatcher.subscribe("USER_SETTINGS_PROTO_UPDATE", onSettings);
