@@ -10,7 +10,6 @@ import {
     SOFT_MEMORY_BYTES,
     type CacheCoreOptions,
     type CacheEntry,
-    type CacheMeta,
     type PutOptions,
     type PutResult,
 } from "./cacheCore";
@@ -18,13 +17,11 @@ import { mediaLookupKeys } from "./hosts";
 import { sniffMime } from "./sniffMime";
 import {
     createDefaultBackend,
-    MemoryStorageBackend,
     type StorageBackend,
 } from "./storage";
 
-export { DEFAULT_MAX_BYTES, SOFT_MEMORY_BYTES, GifCacheCore };
-export type { CacheEntry, CacheMeta, PutOptions, PutResult, StorageBackend };
-export { MemoryStorageBackend };
+export { DEFAULT_MAX_BYTES };
+export type { StorageBackend };
 
 export interface FavoriteGifCacheOptions extends CacheCoreOptions {
     backend?: StorageBackend;
@@ -44,20 +41,14 @@ export class FavoriteGifCache {
     private ready: Promise<void> | null = null;
     private initDone = false;
     private blobUrls = new Map<string, string>();
+    private liveBlobs = new Set<string>();
     private metaPersistQueue = new Map<string, ReturnType<typeof setTimeout>>();
+    private revokeListener: ((blobUrl: string) => void) | null = null;
 
     constructor(options: FavoriteGifCacheOptions = {}) {
         this.core = new GifCacheCore(options);
         this.backend = options.backend ?? createDefaultBackend();
         this.smartEviction = options.smartEviction !== false;
-    }
-
-    get backendName() {
-        return this.backend.name;
-    }
-
-    getSmartEviction() {
-        return this.smartEviction;
     }
 
     setSmartEviction(enabled: boolean) {
@@ -68,26 +59,29 @@ export class FavoriteGifCache {
         return this.initDone;
     }
 
+    setRevokeListener(fn: ((blobUrl: string) => void) | null) {
+        this.revokeListener = fn;
+    }
+
     async init() {
         if (!this.ready) {
             this.ready = (async () => {
                 await this.backend.open();
                 const all = await this.backend.getAll();
 
-                for (const entry of all) {
-                    this.core.loadEntry(entry);
-                    for (const key of this.core.ensureSoftMemory()) this.revokeBlob(key);
-                }
-
+                for (const entry of all) this.core.loadEntry(entry);
 
                 const before = new Set(this.core.keys());
                 const removed = this.core.setMaxBytes(this.core.getMaxBytes());
                 const gone = removed.length
                     ? removed
                     : [...before].filter(k => !this.core.has(k));
-                if (gone.length) await this.backend.deleteMany(gone);
+                if (gone.length) {
+                    await this.backend.deleteMany(gone);
+                    for (const k of gone) this.revokeBlob(k);
+                }
 
-                for (const key of this.core.ensureSoftMemory()) this.revokeBlob(key);
+                this.core.ensureSoftMemory();
 
                 this.initDone = true;
             })();
@@ -104,9 +98,7 @@ export class FavoriteGifCache {
         const fromDisk = await this.backend.get(key);
         if (!fromDisk || fromDisk.data.byteLength === 0) return false;
         this.core.loadEntry(fromDisk);
-        for (const k of this.core.ensureSoftMemory(key)) {
-            if (k !== key) this.revokeBlob(k);
-        }
+        this.core.ensureSoftMemory(key);
         return this.core.hasResidentData(key);
     }
 
@@ -155,38 +147,14 @@ export class FavoriteGifCache {
         return this.core.keys();
     }
 
-    listMeta() {
-        return this.core.listMeta();
-    }
-
-    async get(key: string): Promise<CacheEntry | null> {
-        await this.init();
-        if (this.core.needsHydrate(key)) await this.hydrate(key);
-        const entry = this.core.get(key);
-        if (!entry || entry.data.byteLength === 0) return null;
-
-        await this.backend.put(entry);
-        return entry;
-    }
-
-    async peek(key: string) {
-        await this.init();
-        if (this.core.needsHydrate(key)) await this.hydrate(key);
-        return this.core.peek(key);
-    }
-
     peekSync(key: string) {
         return this.core.peek(key);
     }
 
-    getMetaSync(key: string) {
-        return this.core.getMeta(key);
-    }
-
     touchSync(key: string) {
-        const entry = this.core.get(key);
-        if (!entry) return false;
-        this.scheduleMetaPersist(entry);
+        if (!this.core.touch(key)) return false;
+        const entry = this.core.peekRef(key);
+        if (entry) this.scheduleMetaPersist(entry);
         return true;
     }
 
@@ -207,17 +175,10 @@ export class FavoriteGifCache {
         }
 
         if (result.stored) {
-            const stored = this.core.peek(key);
+            const stored = this.core.peekRef(key);
             if (stored && stored.data.byteLength > 0) {
                 await this.backend.put(stored);
-                this.revokeBlob(key);
-                this.ensureBlobUrlSync(key, { bumpUsage: false });
-            }
-
-            const pinned = new Set(this.core.getDisplayPinnedKeys());
-            for (const k of [...this.blobUrls.keys()]) {
-                if (pinned.has(k)) continue;
-                if (!this.core.hasResidentData(k)) this.revokeBlob(k);
+                if (!this.blobUrls.has(key)) this.ensureBlobUrlSync(key, { bumpUsage: false });
             }
         }
 
@@ -232,22 +193,6 @@ export class FavoriteGifCache {
             this.revokeBlob(key);
         }
         return ok;
-    }
-
-    
-    async pruneNotIn(keepKeys: Iterable<string>) {
-        await this.init();
-        const keep = new Set(keepKeys);
-        const drop: string[] = [];
-        for (const key of this.core.keys()) {
-            if (!keep.has(key)) drop.push(key);
-        }
-        for (const key of drop) {
-            this.core.delete(key);
-            this.revokeBlob(key);
-        }
-        if (drop.length) await this.backend.deleteMany(drop);
-        return drop;
     }
 
     async clear() {
@@ -270,26 +215,21 @@ export class FavoriteGifCache {
             return existing;
         }
 
-
         if (this.core.needsHydrate(key)) return null;
 
-        const entry = bump ? this.core.get(key) : this.core.peek(key);
+        const entry = this.core.peekRef(key);
         if (!entry || entry.data.byteLength === 0) return null;
-        if (bump) this.scheduleMetaPersist(entry);
+        if (bump) this.touchSync(key);
 
         try {
-
             const copy = entry.data.slice();
-            const ab = copy.buffer.slice(copy.byteOffset, copy.byteOffset + copy.byteLength);
             const mime = sniffMime(copy, entry.mimeType || "application/octet-stream");
-            const blob = new Blob([ab], { type: mime || "application/octet-stream" });
+            const blob = new Blob([copy], { type: mime || "application/octet-stream" });
             if (blob.size <= 0) return null;
             const url = URL.createObjectURL(blob);
             this.blobUrls.set(key, url);
-
-            if (mime && mime !== entry.mimeType) {
-                entry.mimeType = mime;
-            }
+            this.liveBlobs.add(url);
+            if (mime && mime !== entry.mimeType) entry.mimeType = mime;
             return url;
         } catch {
             return null;
@@ -305,12 +245,6 @@ export class FavoriteGifCache {
         return this.ensureBlobUrlSync(key, opts);
     }
 
-    resolveDisplayUrlSync(remoteUrl: string): string | null {
-        const hit = this.resolveDisplayHitSync(remoteUrl);
-        return hit?.blobUrl ?? null;
-    }
-
-    
     resolveDisplayHitSync(remoteUrl: string, opts: BlobUrlOptions = {}): { blobUrl: string; mimeType?: string; key: string; } | null {
         if (!remoteUrl || remoteUrl.startsWith("blob:") || remoteUrl.startsWith("data:")) {
             return null;
@@ -339,32 +273,8 @@ export class FavoriteGifCache {
         return null;
     }
 
-    
-    warmAllBlobUrls(keys?: string[]) {
-        const list = keys ?? this.core.keys();
-        let n = 0;
-        for (const key of list) {
-            if (!this.core.hasResidentData(key)) continue;
-            if (this.ensureBlobUrlSync(key, { bumpUsage: false })) n += 1;
-        }
-        return n;
-    }
-
-    async getBlobUrl(key: string) {
-        return this.ensureBlobUrl(key, { bumpUsage: true });
-    }
-
-    getCachedBlobUrl(key: string) {
-        return this.blobUrls.get(key);
-    }
-
-    
     isLiveBlobUrl(blobUrl: string) {
-        if (!blobUrl || !blobUrl.startsWith("blob:")) return false;
-        for (const u of this.blobUrls.values()) {
-            if (u === blobUrl) return true;
-        }
-        return false;
+        return !!blobUrl && this.liveBlobs.has(blobUrl);
     }
 
     private scheduleMetaPersist(entry: CacheEntry) {
@@ -376,7 +286,7 @@ export class FavoriteGifCache {
 
         const t = setTimeout(() => {
             this.metaPersistQueue.delete(entry.key);
-            const latest = this.core.peek(entry.key);
+            const latest = this.core.peekRef(entry.key);
             if (!latest || (latest.data.byteLength === 0 && latest.size > 0)) return;
             void this.backend.put(latest).catch(() => {});
         }, 50);
@@ -385,18 +295,14 @@ export class FavoriteGifCache {
 
     private revokeBlob(key: string) {
         const url = this.blobUrls.get(key);
-        if (url && typeof URL !== "undefined" && URL.revokeObjectURL) {
-            try {
-                URL.revokeObjectURL(url);
-            } catch {
-
+        if (url) {
+            this.liveBlobs.delete(url);
+            try { this.revokeListener?.(url); } catch { }
+            if (typeof URL !== "undefined" && URL.revokeObjectURL) {
+                try { URL.revokeObjectURL(url); } catch { }
             }
         }
         this.blobUrls.delete(key);
-    }
-
-    getCoreForTests() {
-        return this.core;
     }
 }
 
