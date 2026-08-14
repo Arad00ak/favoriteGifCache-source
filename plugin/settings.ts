@@ -68,7 +68,7 @@ export const settings = definePluginSettings({
     },
     prefetchOnStart: {
         type: OptionType.BOOLEAN,
-        description: "Download some favorites in the background after Discord starts",
+        description: "Download favorites in the background until the cache is full",
         default: true,
     },
     rewriteFavoriteSrc: {

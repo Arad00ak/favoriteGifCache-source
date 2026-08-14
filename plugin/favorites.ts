@@ -87,11 +87,6 @@ export function sortFavoritesNewestFirst(refs: FavoriteGifRef[]): FavoriteGifRef
 }
 
 
-export function prefetchTargetBytes(maxBytes: number): number {
-    if (!Number.isFinite(maxBytes) || maxBytes <= 0) return 0;
-    return Math.max(1, Math.floor(maxBytes / 3));
-}
-
 export function cacheKeyForUrl(url: string) {
     if (!url) return url;
     try {
