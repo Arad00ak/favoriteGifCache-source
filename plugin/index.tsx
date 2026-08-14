@@ -599,7 +599,7 @@ async function runWrapWork(job: {
     let downloads = 0;
     for (const ref of job.refs) {
         if (downloads >= 10) break;
-        for (const u of [ref.src, ref.url]) {
+        for (const u of [pickCacheableUrl(ref), ref.src, ref.url]) {
             if (!u || isAutoCacheDenied(u) || !isLikelyGifMediaUrl(u)) continue;
             const key = cacheKeyForUrl(u);
             if (!c.has(key) && !c.has(u) && downloads < 10) {
