@@ -79,11 +79,6 @@ export function remoteDisplaySrc(gif: any): string {
     return "";
 }
 
-export function favoriteStableKey(gif: any): string {
-    if (!gif || typeof gif !== "object") return "";
-    return remoteSendUrl(gif) || remoteDisplaySrc(gif) || "";
-}
-
 export function restoreUrlsForSend(gif: any): void {
     if (!gif || typeof gif !== "object") return;
     stashOriginalUrls(gif);

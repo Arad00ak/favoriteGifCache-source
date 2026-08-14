@@ -31,7 +31,3 @@ export function getPluginNative(): Native | null {
         return null;
     }
 }
-
-export function hasFileNative() {
-    return getPluginNative() != null;
-}

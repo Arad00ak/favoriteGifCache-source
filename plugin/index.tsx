@@ -31,7 +31,6 @@ import {
 import {
     cacheKeyForUrl,
     getFavoriteGifRefsFromFrecency,
-    isCacheableFavoriteUrl,
     isHeavyVideoUrl,
     isLikelyGifMediaUrl,
     keysForFavorite,
@@ -61,9 +60,8 @@ let favoriteUrlSet = new Set<string>();
 let favoritesSeeded = false;
 let prefetchTimer: ReturnType<typeof setTimeout> | null = null;
 let lastPickerInstance: { forceUpdate?: () => void; dead?: boolean } | null = null;
-let forceUpdateTimer: ReturnType<typeof setTimeout> | null = null;
-
 let emptyRetryTimer: ReturnType<typeof setTimeout> | null = null;
+let scanTimer: ReturnType<typeof setTimeout> | null = null;
 let emptyRetryCount = 0;
 let unsubSettings: (() => void) | null = null;
 let mediaErrorBound = false;
@@ -78,7 +76,6 @@ let wrapWorkPending: {
     favorites: any[];
     refs: FavoriteGifRef[];
     visibleKeys: string[];
-    newlyFavorited: string[];
 } | null = null;
 
 function maxBytesFromSettings() {
@@ -275,10 +272,8 @@ function isTrackedFavorite(url: string) {
     return favoriteUrlSet.has(url) || favoriteUrlSet.has(cacheKeyForUrl(url));
 }
 
-function shouldCacheFavoriteUrl(url: string, _format?: number) {
-    if (!url || url.startsWith("blob:") || url.startsWith("data:")) return false;
-
-    return isCacheableFavoriteUrl(url) || isLikelyGifMediaUrl(url);
+function shouldCacheFavoriteUrl(url: string) {
+    return !!url && isLikelyGifMediaUrl(url);
 }
 
 
@@ -351,14 +346,6 @@ function safeForceUpdate(instance: any) {
     } catch {
 
     }
-}
-
-function scheduleForceUpdate(instance: any) {
-    if (forceUpdateTimer) clearTimeout(forceUpdateTimer);
-    forceUpdateTimer = setTimeout(() => {
-        forceUpdateTimer = null;
-        safeForceUpdate(instance ?? lastPickerInstance);
-    }, 48);
 }
 
 function scheduleEmptyRetry(instance: any) {
@@ -526,12 +513,16 @@ function maybeSwapMedia(el: HTMLImageElement | HTMLVideoElement) {
 
 function scanPickerMedia() {
     if (typeof document === "undefined") return;
-    try {
-        for (const node of document.querySelectorAll("img,video")) {
-            maybeSwapMedia(node as HTMLImageElement | HTMLVideoElement);
+    if (scanTimer) return;
+    scanTimer = setTimeout(() => {
+        scanTimer = null;
+        try {
+            for (const node of document.querySelectorAll("img,video")) {
+                maybeSwapMedia(node as HTMLImageElement | HTMLVideoElement);
+            }
+        } catch {
         }
-    } catch {
-    }
+    }, 32);
 }
 
 function ensureMediaObserver() {
@@ -580,9 +571,8 @@ function queueWrapWork(
     favorites: any[],
     refs: FavoriteGifRef[],
     visibleKeys: string[],
-    newlyFavorited: string[],
 ) {
-    wrapWorkPending = { favorites, refs, visibleKeys, newlyFavorited };
+    wrapWorkPending = { favorites, refs, visibleKeys };
     if (wrapWork) return;
     wrapWork = (async () => {
         try {
@@ -601,11 +591,9 @@ async function runWrapWork(job: {
     favorites: any[];
     refs: FavoriteGifRef[];
     visibleKeys: string[];
-    newlyFavorited: string[];
 }) {
     const c = getCache();
     await c.init();
-    c.setRevokeListener(onBlobRevoking);
     c.setDisplayPinnedKeys(job.visibleKeys);
 
     for (const key of job.visibleKeys) {
@@ -614,8 +602,6 @@ async function runWrapWork(job: {
     }
     for (const g of job.favorites) applyCacheSrc(g, c);
     scanPickerMedia();
-
-    await cacheNewFavoriteRefs(newRefsForUrls(job.newlyFavorited, job.refs));
 
     let downloads = 0;
     for (const ref of job.refs) {
@@ -634,10 +620,6 @@ async function runWrapWork(job: {
     }
     for (const g of job.favorites) applyCacheSrc(g, c);
     scanPickerMedia();
-}
-
-async function applyMaxFromSettings() {
-    await applyLimitsFromSettings();
 }
 
 function toast(message: string, type: any) {
@@ -948,7 +930,7 @@ export default definePlugin({
             enqueueFavoriteDiff(added, [], refs);
             const visibleKeys = pinKeysForRefs(refs);
             c.setDisplayPinnedKeys(visibleKeys);
-            queueWrapWork(favorites, refs, visibleKeys, added);
+            queueWrapWork(favorites, refs, visibleKeys);
             scanPickerMedia();
             return favorites;
         } catch {
@@ -968,7 +950,7 @@ export default definePlugin({
 
             }
             await loadDenylist();
-            await applyMaxFromSettings();
+            await applyLimitsFromSettings();
 
             try {
                 await getCache().init();
@@ -988,7 +970,6 @@ export default definePlugin({
 
             const onSettings = () => {
                 syncFromFrecency();
-                void warmCachedFavoriteBlobs();
             };
             try {
                 FluxDispatcher.subscribe("USER_SETTINGS_PROTO_UPDATE", onSettings);
@@ -1019,9 +1000,9 @@ export default definePlugin({
             clearTimeout(prefetchTimer);
             prefetchTimer = null;
         }
-        if (forceUpdateTimer) {
-            clearTimeout(forceUpdateTimer);
-            forceUpdateTimer = null;
+        if (scanTimer) {
+            clearTimeout(scanTimer);
+            scanTimer = null;
         }
         if (emptyRetryTimer) {
             clearTimeout(emptyRetryTimer);
@@ -1054,4 +1035,3 @@ export {
     DEFAULT_MAX_BYTES,
     FavoriteGifCache,
 } from "./gifCache";
-export { GifCacheCore } from "./cacheCore";
