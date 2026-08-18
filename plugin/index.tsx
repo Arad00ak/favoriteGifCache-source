@@ -293,9 +293,11 @@ async function cacheNewFavoriteRefs(refs: FavoriteGifRef[]) {
         const c = getCache();
         await c.init();
         for (const ref of refs) {
+            if (cache !== c) break;
             const tried = new Set<string>();
             const urls = [pickCacheableUrl(ref), ref.src, ref.url];
             for (const cacheUrl of urls) {
+                if (cache !== c) break;
                 if (!cacheUrl || !isLikelyGifMediaUrl(cacheUrl) || isAutoCacheDenied(cacheUrl)) continue;
                 const key = cacheKeyForUrl(cacheUrl);
                 if (tried.has(key)) continue;
@@ -599,17 +601,17 @@ async function runWrapWork(job: {
 
     let downloads = 0;
     for (const ref of job.refs) {
+        if (cache !== c) break;
         if (downloads >= 10) break;
-        for (const u of [pickCacheableUrl(ref), ref.src, ref.url]) {
-            if (!u || isAutoCacheDenied(u) || !isLikelyGifMediaUrl(u)) continue;
-            const key = cacheKeyForUrl(u);
-            if (!c.has(key) && !c.has(u) && downloads < 10) {
-                await ensureCached(c, u, { allowEvict: false, ...autoCacheOpts() });
-                downloads += 1;
-            }
-            if (c.has(key) || c.has(u)) {
-                await c.ensureBlobUrl(key, { bumpUsage: false });
-            }
+        const u = pickCacheableUrl(ref) || ref.src || ref.url;
+        if (!u || isAutoCacheDenied(u) || !isLikelyGifMediaUrl(u)) continue;
+        const key = cacheKeyForUrl(u);
+        if (!c.has(key) && !c.has(u)) {
+            await ensureCached(c, u, { allowEvict: false, ...autoCacheOpts() });
+            downloads += 1;
+        }
+        if (c.has(key) || c.has(u)) {
+            await c.ensureBlobUrl(key, { bumpUsage: false });
         }
     }
     for (const g of job.favorites) applyCacheSrc(g, c);
@@ -666,6 +668,7 @@ async function manualCacheGif(url: string) {
     }
 
     for (const u of queue) {
+        if (cache !== c) break;
         if (!u || tried.has(u)) continue;
         tried.add(u);
         try {
@@ -750,21 +753,18 @@ async function prefetchFavorites() {
         const seen = new Set<string>();
         let steps = 0;
         for (const ref of newest) {
-            if (!prefetchRunning || settings.store.prefetchOnStart === false || c.bytes() >= cap) break;
-            for (const u of [pickCacheableUrl(ref), ref.src, ref.url]) {
-                if (!prefetchRunning || settings.store.prefetchOnStart === false) break;
-                if (!u || !isLikelyGifMediaUrl(u) || isAutoCacheDenied(u)) continue;
-                const key = cacheKeyForUrl(u);
-                if (seen.has(key) || c.has(key) || c.has(u)) continue;
-                seen.add(key);
-                try {
-                    await ensureCached(c, u, { allowEvict: false, ...autoCacheOpts() });
-                } catch {
-                }
-                if (c.bytes() >= cap) break;
-                steps += 1;
-                if (steps % 3 === 0) await new Promise(r => setTimeout(r, 0));
+            if (cache !== c || !prefetchRunning || settings.store.prefetchOnStart === false || c.bytes() >= cap) break;
+            const u = pickCacheableUrl(ref) || ref.src || ref.url;
+            if (!u || !isLikelyGifMediaUrl(u) || isAutoCacheDenied(u)) continue;
+            const key = cacheKeyForUrl(u);
+            if (seen.has(key) || c.has(key) || c.has(u)) continue;
+            seen.add(key);
+            try {
+                await ensureCached(c, u, { allowEvict: false, ...autoCacheOpts() });
+            } catch {
             }
+            steps += 1;
+            if (steps % 3 === 0) await new Promise(r => setTimeout(r, 0));
         }
 
         for (const ref of newest) {
@@ -882,6 +882,7 @@ export default definePlugin({
             void (async () => {
                 try {
                     await c.init();
+                    if (cache !== c) return;
                     await cacheOnUserAction(c, remote, fetch, autoCacheOpts());
                     c.ensureBlobUrlSync(cacheKeyForUrl(remote), { bumpUsage: true });
                 } catch {
