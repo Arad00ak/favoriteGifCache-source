@@ -46,11 +46,6 @@ export function hostAllowed(hostname: string): boolean {
     return false;
 }
 
-function isTenorMediaHost(hostname: string): boolean {
-    const h = hostname.toLowerCase().replace(/\.$/, "");
-    return h === "media.tenor.com" || h === "c.tenor.com" || h.endsWith(".media.tenor.com");
-}
-
 export function isDirectMediaUrl(url: string): boolean {
     try {
         const u = new URL(url);
@@ -68,44 +63,6 @@ export function isDirectMediaUrl(url: string): boolean {
     } catch {
         return false;
     }
-}
-
-export function tenorToKlipyFallbackUrls(url: string): string[] {
-    let parsed: URL;
-    try {
-        parsed = new URL(url);
-    } catch {
-        return [];
-    }
-    if (!isTenorMediaHost(parsed.hostname)) return [];
-    if (!isDirectMediaUrl(url)) return [];
-
-    const out: string[] = [];
-    const seen = new Set<string>();
-    for (const host of KLIPY_MEDIA_HOSTS) {
-        try {
-            const u = new URL(parsed.href);
-            u.hostname = host;
-            u.protocol = "https:";
-            if (seen.has(u.href)) continue;
-            seen.add(u.href);
-            out.push(u.href);
-        } catch {
-        }
-    }
-    return out;
-}
-
-export function mediaDownloadCandidates(url: string): string[] {
-    if (!url) return [];
-    const out = [url];
-    const seen = new Set([url]);
-    for (const alt of tenorToKlipyFallbackUrls(url)) {
-        if (seen.has(alt)) continue;
-        seen.add(alt);
-        out.push(alt);
-    }
-    return out;
 }
 
 const lookupMemo = new Map<string, string[]>();

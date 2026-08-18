@@ -31,7 +31,7 @@ So the first view can still hit the network. After that, hits should be local an
 
 ### On startup (if prefetch is on)
 
-It walks your favorites from newest to older and downloads until the cache hits about **1/3** of max size (default 500 MB -> ~167 MB). It does not fill the whole cache on boot on purpose.
+It walks your favorites from newest to older once and stops when the cache reaches its configured size limit.
 
 ### When you're using the picker
 
