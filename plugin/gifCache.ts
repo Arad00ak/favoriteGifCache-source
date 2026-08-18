@@ -55,6 +55,10 @@ export class FavoriteGifCache {
         this.smartEviction = enabled;
     }
 
+    isSmartEvictionEnabled() {
+        return this.smartEviction;
+    }
+
     isInitialized() {
         return this.initDone;
     }
@@ -96,7 +100,12 @@ export class FavoriteGifCache {
         if (this.core.hasResidentData(key)) return true;
 
         const fromDisk = await this.backend.get(key);
-        if (!fromDisk || fromDisk.data.byteLength === 0) return false;
+        if (!fromDisk || fromDisk.data.byteLength === 0) {
+            this.core.delete(key);
+            this.revokeBlob(key);
+            try { await this.backend.delete(key); } catch { }
+            return false;
+        }
         this.core.loadEntry(fromDisk);
         this.core.ensureSoftMemory(key);
         return this.core.hasResidentData(key);
