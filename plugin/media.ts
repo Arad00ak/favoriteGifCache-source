@@ -9,14 +9,26 @@ import {
     cacheKeyForUrl,
     isLikelyGifMediaUrl,
 } from "./favorites";
-import { isDirectMediaUrl, mediaDownloadCandidates, mediaLookupKeys } from "./hosts";
+import { isDirectMediaUrl, mediaLookupKeys } from "./hosts";
 import { getPluginNative } from "./nativeApi";
 import { sniffMime } from "./sniffMime";
 
 const inflight = new Map<string, Promise<{ data: Uint8Array; mime: string; } | null>>();
+const failedAutoDownloads = new WeakMap<FavoriteGifCache, Map<string, string>>();
+const fullCacheStates = new WeakMap<FavoriteGifCache, string>();
 
 
 export const MAX_ENTRY_BYTES = 12 * 1024 * 1024;
+
+function cacheState(cache: FavoriteGifCache) {
+    return `${cache.bytes()}:${cache.getMaxBytes()}:${cache.isSmartEvictionEnabled()}`;
+}
+
+function rememberAutoFailure(cache: FavoriteGifCache, key: string, state = "session") {
+    let failures = failedAutoDownloads.get(cache);
+    if (!failures) failedAutoDownloads.set(cache, failures = new Map());
+    failures.set(key, state);
+}
 
 function guessMime(url: string, contentType: string | null, data?: Uint8Array) {
 
@@ -40,7 +52,7 @@ function guessMime(url: string, contentType: string | null, data?: Uint8Array) {
 
 async function downloadOneUrl(
     url: string,
-    _fetchImpl: typeof fetch,
+    fetchImpl: typeof fetch,
     maxBytes: number,
 ): Promise<{ data: Uint8Array; mime: string; } | null> {
     if (!isDirectMediaUrl(url)) return null;
@@ -66,22 +78,52 @@ async function downloadOneUrl(
     }
 
     try {
-        const res = await _fetchImpl(url, {
+        const res = await fetchImpl(url, {
             credentials: "omit",
             cache: "no-store",
             mode: "cors",
             redirect: "error",
+            signal: typeof AbortSignal !== "undefined" && typeof AbortSignal.timeout === "function"
+                ? AbortSignal.timeout(30_000)
+                : undefined,
         } as RequestInit);
-        if (!res.ok) return null;
+        if (!res.ok) {
+            try { await res.body?.cancel(); } catch { }
+            return null;
+        }
         const lenHeader = res.headers.get("content-length");
         if (lenHeader) {
             const len = Number(lenHeader);
-            if (Number.isFinite(len) && len > maxBytes) return null;
+            if (Number.isFinite(len) && len > maxBytes) {
+                try { await res.body?.cancel(); } catch { }
+                return null;
+            }
         }
-        const buf = new Uint8Array(await res.arrayBuffer());
-        if (!buf.byteLength || buf.byteLength > maxBytes) return null;
-        const mime = guessMime(url, res.headers.get("content-type"), buf);
-        return { data: buf, mime };
+
+        const reader = res.body?.getReader();
+        if (!reader) return null;
+
+        const chunks: Uint8Array[] = [];
+        let total = 0;
+        for (;;) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            if (!value) continue;
+            total += value.byteLength;
+            if (total > maxBytes) {
+                try { await reader.cancel(); } catch { }
+                return null;
+            }
+            chunks.push(value);
+        }
+        if (!total) return null;
+        const data = new Uint8Array(total);
+        let offset = 0;
+        for (const chunk of chunks) {
+            data.set(chunk, offset);
+            offset += chunk.byteLength;
+        }
+        return { data, mime: guessMime(url, res.headers.get("content-type"), data) };
     } catch {
         return null;
     }
@@ -92,13 +134,8 @@ async function downloadFavoriteMedia(
     url: string,
     fetchImpl: typeof fetch = fetch,
     maxBytes = MAX_ENTRY_BYTES,
-): Promise<{ data: Uint8Array; mime: string; fromUrl?: string; } | null> {
-    const candidates = mediaDownloadCandidates(url);
-    for (const candidate of candidates) {
-        const hit = await downloadOneUrl(candidate, fetchImpl, maxBytes);
-        if (hit) return { ...hit, fromUrl: candidate };
-    }
-    return null;
+): Promise<{ data: Uint8Array; mime: string; } | null> {
+    return downloadOneUrl(url, fetchImpl, maxBytes);
 }
 
 async function getCachedBytes(cache: FavoriteGifCache, url: string) {
@@ -143,7 +180,9 @@ export async function ensureCached(
         : fetchImplOrOpts;
     const fetchImpl = opts.fetchImpl ?? fetch;
     const allowEvict = opts.allowEvict === true;
-    const maxBytes = opts.maxBytes ?? MAX_ENTRY_BYTES;
+    const maxBytes = Number.isFinite(opts.maxBytes) && opts.maxBytes! > 0
+        ? opts.maxBytes!
+        : MAX_ENTRY_BYTES;
     const force = opts.force === true;
 
     if (!force && opts.isDenied?.(url)) return null;
@@ -154,11 +193,33 @@ export async function ensureCached(
         return { ...hit, fromCache: true as const, stored: true as const };
     }
 
+    const state = cacheState(cache);
+    const canEvict = allowEvict && cache.isSmartEvictionEnabled();
+    const failedState = failedAutoDownloads.get(cache)?.get(key);
+    if (!force && (
+        failedState === "session"
+        || failedState === state
+        || fullCacheStates.get(cache) === state
+    )) {
+        return null;
+    }
+
+    const availableBytes = canEvict
+        ? cache.getMaxBytes()
+        : cache.getMaxBytes() - cache.bytes();
+    const downloadMaxBytes = Number.isFinite(availableBytes)
+        ? Math.min(maxBytes, availableBytes)
+        : maxBytes;
+    if (downloadMaxBytes <= 0) {
+        fullCacheStates.set(cache, state);
+        return null;
+    }
+
     let pending = inflight.get(key);
     if (!pending) {
         pending = (async () => {
             try {
-                return await downloadFavoriteMedia(url, fetchImpl, maxBytes);
+                return await downloadFavoriteMedia(url, fetchImpl, downloadMaxBytes);
             } catch {
                 return null;
             } finally {
@@ -169,27 +230,38 @@ export async function ensureCached(
     }
 
     const downloaded = await pending;
-    if (!downloaded) return null;
-
-
-    if (downloaded.data.byteLength > maxBytes) {
+    if (!downloaded) {
+        if (!force) {
+            rememberAutoFailure(
+                cache,
+                key,
+                !canEvict && downloadMaxBytes < maxBytes ? cacheState(cache) : "session",
+            );
+            if (!canEvict && downloadMaxBytes < Math.min(maxBytes, MAX_ENTRY_BYTES)) {
+                fullCacheStates.set(cache, cacheState(cache));
+            }
+        }
         return null;
     }
 
 
-    await cache.put(key, downloaded.data, downloaded.mime, { allowEvict });
-
-
-    const fromKey = downloaded.fromUrl ? cacheKeyForUrl(downloaded.fromUrl) : null;
-    if (fromKey && fromKey !== key) {
-        await cache.put(fromKey, downloaded.data, downloaded.mime, { allowEvict: false });
+    if (downloaded.data.byteLength > maxBytes) {
+        if (!force) rememberAutoFailure(cache, key);
+        return null;
     }
 
-    let entry = cache.peekSync(key);
-    if (!entry && allowEvict) {
-        await cache.put(key, downloaded.data, downloaded.mime, { allowEvict: true });
-        entry = cache.peekSync(key);
+
+    const put = await cache.put(key, downloaded.data, downloaded.mime, { allowEvict });
+    if (!put.stored && !force) {
+        rememberAutoFailure(cache, key, put.skippedFull ? cacheState(cache) : "session");
     }
+    if (put.skippedFull) fullCacheStates.set(cache, cacheState(cache));
+    if (put.stored) {
+        failedAutoDownloads.get(cache)?.delete(key);
+        fullCacheStates.delete(cache);
+    }
+
+    const entry = cache.peekSync(key);
 
     return {
         data: downloaded.data,
@@ -197,6 +269,7 @@ export async function ensureCached(
         key,
         fromCache: false as const,
         stored: !!entry,
+        skippedFull: put.skippedFull === true,
     };
 }
 
