@@ -142,68 +142,72 @@ export class GifCacheCore {
     }
 
     
+    preparePut(
+        key: string,
+        data: Uint8Array,
+        mimeType = "application/octet-stream",
+        options: PutOptions = {},
+    ): { result: PutResult; entry: CacheEntry | null; } {
+        const rejected = (skippedFull = false) => ({
+            result: { stored: false, evictedKeys: [], skippedFull },
+            entry: null,
+        });
+        if (!key) return rejected();
+
+        const allowEvict = options.allowEvict === true;
+        const payload = data instanceof Uint8Array ? data.slice() : new Uint8Array(data);
+        const size = payload.byteLength;
+
+        const existing = this.entries.get(key);
+        if (size > this.maxBytes && this.maxBytes !== Number.POSITIVE_INFINITY) {
+            return rejected();
+        }
+        const evictedKeys: string[] = [];
+        let required = this.totalBytes - (existing?.size ?? 0) + size - this.maxBytes;
+        if (required > 0) {
+            if (!allowEvict) return rejected(true);
+            const victims = [...this.entries.values()]
+                .filter(entry => entry.key !== key)
+                .sort((a, b) => {
+                    const protection = Number(this.protectedKeys.has(a.key)) - Number(this.protectedKeys.has(b.key));
+                    return protection || (this.isWorse(a, b) ? -1 : this.isWorse(b, a) ? 1 : 0);
+                });
+            for (const victim of victims) {
+                if (required <= 0) break;
+                required -= victim.size;
+                evictedKeys.push(victim.key);
+            }
+            if (required > 0) return rejected(true);
+        }
+
+        const t = this.now();
+        return {
+            result: { stored: true, evictedKeys },
+            entry: {
+                key,
+                data: payload,
+                size,
+                mimeType: mimeType || "application/octet-stream",
+                useCount: existing?.useCount ?? 0,
+                lastUsed: t,
+                createdAt: existing?.createdAt ?? t,
+            },
+        };
+    }
+
     put(
         key: string,
         data: Uint8Array,
         mimeType = "application/octet-stream",
         options: PutOptions = {},
     ): PutResult {
-        if (!key) return { stored: false, evictedKeys: [] };
-
-        const allowEvict = options.allowEvict === true;
-        const payload = data instanceof Uint8Array ? data.slice() : new Uint8Array(data);
-        const size = payload.byteLength;
-        const evictedKeys: string[] = [];
-
-        const existing = this.entries.get(key);
-        if (existing) {
-            this.totalBytes -= existing.size;
-            this.entries.delete(key);
+        const { result, entry } = this.preparePut(key, data, mimeType, options);
+        if (entry) {
+            for (const victim of result.evictedKeys) this.delete(victim);
+            this.loadEntry(entry);
+            this.ensureSoftMemory(key);
         }
-
-        if (size > this.maxBytes && this.maxBytes !== Number.POSITIVE_INFINITY) {
-            return { stored: false, evictedKeys };
-        }
-
-        while (this.totalBytes + size > this.maxBytes) {
-            if (!allowEvict) {
-
-                if (existing) {
-                    this.entries.set(existing.key, existing);
-                    this.totalBytes += existing.size;
-                }
-                return { stored: false, evictedKeys, skippedFull: true };
-            }
-            const victim = this.pickVictim(key);
-            if (!victim) break;
-            this.entries.delete(victim.key);
-            this.totalBytes -= victim.size;
-            evictedKeys.push(victim.key);
-        }
-
-        if (this.totalBytes + size > this.maxBytes) {
-            if (existing) {
-                this.entries.set(existing.key, existing);
-                this.totalBytes += existing.size;
-            }
-            return { stored: false, evictedKeys, skippedFull: true };
-        }
-
-        const t = this.now();
-        const entry: CacheEntry = {
-            key,
-            data: payload,
-            size,
-            mimeType: mimeType || "application/octet-stream",
-            useCount: existing?.useCount ?? 0,
-            lastUsed: t,
-            createdAt: existing?.createdAt ?? t,
-        };
-
-        this.entries.set(key, entry);
-        this.totalBytes += size;
-        this.ensureSoftMemory(key);
-        return { stored: true, evictedKeys };
+        return result;
     }
 
     delete(key: string) {

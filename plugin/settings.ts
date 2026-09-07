@@ -19,7 +19,7 @@ export const settingsHooks = {
     onCacheDirectoryChange: () => {},
 };
 
-const STALE_SETTING_KEYS = ["maxEntries", "showCacheBadges"] as const;
+const STALE_SETTING_KEYS = ["maxEntries", "showCacheBadges", "rewriteFavoriteSrc"] as const;
 
 export function purgeStalePluginSettings() {
     try {
@@ -69,11 +69,6 @@ export const settings = definePluginSettings({
     prefetchOnStart: {
         type: OptionType.BOOLEAN,
         description: "Download favorites in the background until the cache is full",
-        default: true,
-    },
-    rewriteFavoriteSrc: {
-        type: OptionType.BOOLEAN,
-        description: "Show cached GIFs from disk in the picker (faster)",
         default: true,
     },
 });

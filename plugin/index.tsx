@@ -110,6 +110,7 @@ function getCache() {
 }
 
 async function rebuildCache() {
+    cache?.dispose();
     cache = null;
     setActiveCache(null);
     const c = getCache();
@@ -193,7 +194,6 @@ function enqueueFavoriteDiff(added: string[], removed: string[], refs: FavoriteG
 function syncFromFrecency() {
     hookFavoriteUpdates();
     const refs = getFavoriteGifRefsFromFrecency();
-    if (!refs.length) return;
     const { added, removed } = refreshFavoriteSet(refs);
     enqueueFavoriteDiff(added, removed, refs);
     kickPrefetch();
@@ -397,7 +397,7 @@ function remoteCandidates(gif: any): string[] {
 
 function applyCacheSrc(gif: any, c: FavoriteGifCache | null): boolean {
     healStoreGif(gif, c);
-    if (!c?.isInitialized() || !settings.store.rewriteFavoriteSrc) return false;
+    if (!c?.isInitialized()) return false;
     if (isBlobOrDataUrl(gif.src) && c.isLiveBlobUrl(gif.src)) return false;
 
     let format = typeof gif.format === "number"
@@ -485,7 +485,6 @@ function onPickerMediaError(ev: Event) {
 
 function maybeSwapMedia(el: HTMLImageElement | HTMLVideoElement) {
     try {
-        if (!settings.store.rewriteFavoriteSrc) return;
         const src = el.getAttribute("src") || el.src || "";
         if (!src || src.startsWith("blob:") || src.startsWith("data:")) return;
         if (!isRemoteHttpUrl(src) || !isLikelyGifMediaUrl(src)) return;
@@ -903,7 +902,8 @@ export default definePlugin({
 
             if (favorites.length === 0) {
                 requestFavoriteGifsLoad();
-                refreshFavoriteSet();
+                const { removed } = refreshFavoriteSet();
+                enqueueFavoriteDiff([], removed, []);
                 scheduleEmptyRetry(instance);
                 return favorites;
             }
@@ -932,13 +932,6 @@ export default definePlugin({
         try {
             purgeStalePluginSettings();
 
-            try {
-                if (settings.store.rewriteFavoriteSrc !== true) {
-                    settings.store.rewriteFavoriteSrc = true;
-                }
-            } catch {
-
-            }
             await loadDenylist();
             await applyLimitsFromSettings();
 
@@ -1005,6 +998,7 @@ export default definePlugin({
         pendingRemoveKeys.clear();
         unbindMediaErrorHealer();
         wrapWorkPending = null;
+        cache?.dispose();
         cache = null;
         setActiveCache(null);
         favoriteUrlSet = new Set();

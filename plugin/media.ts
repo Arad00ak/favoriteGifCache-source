@@ -198,8 +198,8 @@ export async function ensureCached(
     const failedState = failedAutoDownloads.get(cache)?.get(key);
     if (!force && (
         failedState === "session"
-        || failedState === state
-        || fullCacheStates.get(cache) === state
+        || (!canEvict && failedState === state)
+        || (!canEvict && fullCacheStates.get(cache) === state)
     )) {
         return null;
     }
